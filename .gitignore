@@ -1,0 +1,14 @@
+# Personal usque identity — do not commit
+config.json
+
+# Tunnel logs
+usque.log
+
+# OS / editor noise
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+__pycache__/
+*.pyc
