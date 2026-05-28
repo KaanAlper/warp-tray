@@ -101,15 +101,32 @@ session. Lighter DPI footprint, no `warp-svc` daemon, runs as your user.
 
 | Action | How |
 |--------|-----|
-| Connect / disconnect | Left-click tray icon |
-| Menu | Right-click tray icon |
-| Connect from terminal | `sudo -n warp-on` |
+| Toggle (off → HTTP/2 connect / on → disconnect) | Left-click tray icon |
+| Menu (Disconnect / HTTP/2 / HTTP/3 / Quit) | Right-click tray icon |
+| Switch mode while connected | Pick HTTP/2 or HTTP/3 in the menu — it disconnects, waits, reconnects in the new mode |
+| Connect from terminal | `sudo -n warp-on` (HTTP/2) or `sudo -n warp-on http3` |
 | Disconnect from terminal | `sudo -n warp-off` |
 | See tunnel diagnostics | `tail -f /var/log/usque.log` |
 | Check current state | `ip link show tun0` (exists ⇒ on) |
 
-The icon polls `tun0` every 3 s, so external changes (script call, reboot,
-WARP dropping itself) are reflected within ~3 s.
+The icon polls `tun0` + the running `usque` cmdline every 3 s, so external
+changes (script call, reboot, WARP dropping itself) are reflected within ~3 s,
+and the menu always shows which mode is currently active.
+
+### HTTP/2 vs HTTP/3 — which one?
+
+| | HTTP/2 (TCP+TLS) | HTTP/3 (QUIC/UDP) |
+|---|---|---|
+| ISP shaping in TR | Low — looks like normal HTTPS | High — UDP 443 throttled |
+| Handshake latency | 2–3 RTT | 0–1 RTT |
+| Head-of-line blocking | TCP-level | None (per-stream) |
+| Throughput on clean networks | Slightly lower | Slightly higher |
+| Throughput on TR ISPs (with QUIC shaping) | Higher in practice | Lower in practice |
+| Discord WebSocket stability | Better — fewer zombie sockets | Worse — UDP drops cascade |
+
+**Default is HTTP/2** because in DPI-aggressive networks it survives ISP
+shaping better and Discord-style long-lived TCP connections are more stable.
+Pick HTTP/3 from the menu if you want raw speed on a clean line.
 
 ---
 
