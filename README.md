@@ -21,10 +21,9 @@ Tested on **CachyOS / Arch + Hyprland (illogical-impulse dots)**. Vanilla
 ## One-liner install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/USER/REPO/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KaanAlper/warp-tray/main/install.sh | bash
 ```
 
-> Replace `USER/REPO` with your GitHub path after pushing this repo.
 
 You will be prompted once for `sudo` (the script re-launches itself as root)
 and once for the `usque register` step (creates `~/config.json`, your WARP
@@ -38,7 +37,7 @@ connect. After a reboot the tray auto-starts via Hyprland's exec hook.
 ## Manual install (cloned repo)
 
 ```bash
-git clone https://github.com/USER/REPO.git
+git clone https://github.com/KaanAlper/warp-tray.git
 cd REPO
 ./install.sh
 ```
