@@ -54,45 +54,53 @@ fi
 
 #=== /usr/local/bin/warp-on ===================================================
 say "Writing /usr/local/bin/warp-on…"
-cat > /usr/local/bin/warp-on << EOF
+cat > /usr/local/bin/warp-on << 'EOF'
 #!/usr/bin/env bash
 # WARP nativetun start — physical is default, only listed apps/ifaces/domains go through WARP.
 # Usage: warp-on [http2|http3]   (default: http2)
 # Runs as root via sudoers NOPASSWD.
 set -e
 
-MODE="\${1:-http2}"
-case "\$MODE" in
+MODE="${1:-http2}"
+case "$MODE" in
     http2) PROTO_FLAGS="--http2" ;;
     http3) PROTO_FLAGS="" ;;
     *) echo "Usage: warp-on [http2|http3]" >&2; exit 2 ;;
 esac
 
-USQUE_DIR="$TARGET_HOME"
-USQUE_CONFIG="\${USQUE_DIR}/config.json"
 MASQUE_IP="162.159.198.2"
-ROUTE_CONF="$TARGET_HOME/.config/warp-route.conf"
 WARP_TABLE=201
 WARP_MARK=0x43
-USER_NAME="$TARGET_USER"
-USER_UID="$TARGET_UID"
 SLICE_NAME="warp-only.slice"
 RUN_DIR="/run/warp"
 
-GW=\$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print \$3; exit}')
-DEV=\$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print \$5; exit}')
-if [ -z "\$GW" ]; then
-    GW=\$(ip -4 route show default 2>/dev/null | awk '{print \$3; exit}')
-    DEV=\$(ip -4 route show default 2>/dev/null | awk '{print \$5; exit}')
+# Hedef kullaniciyi runtime'da belirle (hardcode yok):
+#   sudo ile cagrildiysa SUDO_USER, degilse ilk normal kullanici (uid 1000).
+USER_NAME="${SUDO_USER:-}"
+{ [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; } && USER_NAME=$(id -nu 1000 2>/dev/null)
+[ -z "$USER_NAME" ] && { echo "ERROR: hedef kullanici bulunamadi" >&2; exit 1; }
+USER_UID=$(id -u "$USER_NAME")
+USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+[ -z "$USER_HOME" ] && { echo "ERROR: $USER_NAME icin home bulunamadi" >&2; exit 1; }
+
+USQUE_DIR="$USER_HOME"
+USQUE_CONFIG="${USQUE_DIR}/config.json"
+ROUTE_CONF="$USER_HOME/.config/warp-route.conf"
+
+GW=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $3; exit}')
+DEV=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $5; exit}')
+if [ -z "$GW" ]; then
+    GW=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+    DEV=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
 fi
-[ -z "\$GW" ] || [ -z "\$DEV" ] && { echo "ERROR: no default gateway" >&2; exit 1; }
+[ -z "$GW" ] || [ -z "$DEV" ] && { echo "ERROR: no default gateway" >&2; exit 1; }
 
 if ! pgrep -x usque >/dev/null; then
-    cd "\$USQUE_DIR"
-    nohup usque -c "\$USQUE_CONFIG" nativetun \\
-        --always-reconnect \\
-        --keepalive-period 15s \\
-        \$PROTO_FLAGS \\
+    cd "$USQUE_DIR"
+    nohup usque -c "$USQUE_CONFIG" nativetun \
+        --always-reconnect \
+        --keepalive-period 15s \
+        $PROTO_FLAGS \
         >/var/log/usque.log 2>&1 &
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         ip link show tun0 >/dev/null 2>&1 && break
@@ -101,32 +109,32 @@ if ! pgrep -x usque >/dev/null; then
 fi
 
 # MASQUE endpoint dogrudan physical uzerinden cikmali.
-ip route replace "\${MASQUE_IP}/32" via "\$GW" dev "\$DEV"
+ip route replace "${MASQUE_IP}/32" via "$GW" dev "$DEV"
 
 # Physical default route korunuyor — tun0 default yapilmiyor.
-ip route flush table "\$WARP_TABLE" 2>/dev/null || true
-ip route add default dev tun0 table "\$WARP_TABLE"
-ip rule del fwmark "\$WARP_MARK" 2>/dev/null || true
-ip rule add fwmark "\$WARP_MARK" table "\$WARP_TABLE" priority 100
+ip route flush table "$WARP_TABLE" 2>/dev/null || true
+ip route add default dev tun0 table "$WARP_TABLE"
+ip rule del fwmark "$WARP_MARK" 2>/dev/null || true
+ip rule add fwmark "$WARP_MARK" table "$WARP_TABLE" priority 100
 
 # rp_filter: asimetrik routing icin gevsetilir. Mevcut deger saklanir, warp-off geri yukler.
-mkdir -p "\$RUN_DIR" 2>/dev/null || true
-sysctl -n net.ipv4.conf.all.rp_filter > "\$RUN_DIR/rpfilter.all" 2>/dev/null || true
-sysctl -n "net.ipv4.conf.\${DEV}.rp_filter" > "\$RUN_DIR/rpfilter.dev" 2>/dev/null || true
-printf '%s\\n' "\$DEV" > "\$RUN_DIR/rpfilter.devname" 2>/dev/null || true
+mkdir -p "$RUN_DIR" 2>/dev/null || true
+sysctl -n net.ipv4.conf.all.rp_filter > "$RUN_DIR/rpfilter.all" 2>/dev/null || true
+sysctl -n "net.ipv4.conf.${DEV}.rp_filter" > "$RUN_DIR/rpfilter.dev" 2>/dev/null || true
+printf '%s\n' "$DEV" > "$RUN_DIR/rpfilter.devname" 2>/dev/null || true
 sysctl -wq net.ipv4.conf.all.rp_filter=2
-sysctl -wq "net.ipv4.conf.\${DEV}.rp_filter=2" 2>/dev/null || true
+sysctl -wq "net.ipv4.conf.${DEV}.rp_filter=2" 2>/dev/null || true
 
 # warp-only.slice icin cgroup path'i al.
-runuser -u "\$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/\${USER_UID}" \\
-    systemctl --user start "\$SLICE_NAME" 2>/dev/null || true
-SLICE_PATH=\$(runuser -u "\$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/\${USER_UID}" \\
-    systemctl --user show -p ControlGroup --value "\$SLICE_NAME" 2>/dev/null)
+runuser -u "$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
+    systemctl --user start "$SLICE_NAME" 2>/dev/null || true
+SLICE_PATH=$(runuser -u "$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
+    systemctl --user show -p ControlGroup --value "$SLICE_NAME" 2>/dev/null)
 
-if [ -n "\$SLICE_PATH" ] && [ -d "/sys/fs/cgroup\${SLICE_PATH}" ]; then
-    SLICE_REL_PATH="\${SLICE_PATH#/}"
-    IFS=/ read -ra _parts <<< "\$SLICE_REL_PATH"
-    SLICE_LEVEL=\${#_parts[@]}
+if [ -n "$SLICE_PATH" ] && [ -d "/sys/fs/cgroup${SLICE_PATH}" ]; then
+    SLICE_REL_PATH="${SLICE_PATH#/}"
+    IFS=/ read -ra _parts <<< "$SLICE_REL_PATH"
+    SLICE_LEVEL=${#_parts[@]}
 else
     SLICE_REL_PATH=""
     SLICE_LEVEL=""
@@ -136,7 +144,7 @@ fi
 nft delete table inet warp_route 2>/dev/null || true
 nft delete table ip warp_nat 2>/dev/null || true
 nft add table inet warp_route
-nft -- add chain inet warp_route prerouting '{ type filter hook prerouting priority -150 ; }'
+nft -- add chain inet warp_route prerouting  '{ type filter hook prerouting priority -150 ; }'
 nft -- add chain inet warp_route postrouting '{ type filter hook postrouting priority -150 ; }'
 # TCP MSS clamp: tun0 MTU=1280 vs LAN MTU=1500 uyusmazligini onler (TLS handshake drop).
 nft add rule inet warp_route postrouting oifname tun0 tcp flags syn tcp option maxseg size set 1220
@@ -146,42 +154,42 @@ nft -- add chain inet warp_route output  '{ type route  hook output priority -15
 nft -- add chain inet warp_route output6 '{ type filter hook output priority -150 ; }'
 
 # Domain tabanli IP set'leri — dnsmasq DNS sorgularinda doldurur. Timeout 1h.
-nft add set inet warp_route warp_hosts \\
+nft add set inet warp_route warp_hosts \
     '{ type ipv4_addr ; flags interval,timeout ; timeout 3600s ; }'
-nft add set inet warp_route warp_hosts6 \\
+nft add set inet warp_route warp_hosts6 \
     '{ type ipv6_addr ; flags interval,timeout ; timeout 3600s ; }'
 
 # --- IPv4: conntrack mark save/restore + marking (output, type route) ---
 # 1) Established baglanti: bizim connmark'imiz varsa packet mark'a geri yukle.
 #    Boylece set TTL'i dolsa bile aktif baglanti WARP'ta kalir (kopmaz/leak olmaz).
-nft add rule inet warp_route output ct mark "\$WARP_MARK" meta mark set "\$WARP_MARK"
+nft add rule inet warp_route output ct mark "$WARP_MARK" meta mark set "$WARP_MARK"
 # 2) Blacklist domainleri ve cgroup app'larini damgala.
-nft add rule inet warp_route output ip daddr @warp_hosts counter meta mark set "\$WARP_MARK"
-if [ -n "\$SLICE_REL_PATH" ]; then
-    nft "add rule inet warp_route output socket cgroupv2 level \$SLICE_LEVEL \\"\$SLICE_REL_PATH\\" counter meta mark set \$WARP_MARK"
+nft add rule inet warp_route output ip daddr @warp_hosts counter meta mark set "$WARP_MARK"
+if [ -n "$SLICE_REL_PATH" ]; then
+    nft "add rule inet warp_route output socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter meta mark set $WARP_MARK"
 fi
 # 3) Bizim mark'imizi connmark'a kaydet (sonraki paketler restore edebilsin).
-nft add rule inet warp_route output meta mark "\$WARP_MARK" ct mark set "\$WARP_MARK"
+nft add rule inet warp_route output meta mark "$WARP_MARK" ct mark set "$WARP_MARK"
 
 # --- IPv6 fail-closed: WARP'lik v6 trafigini reddet -> app v4'e duser -> WARP ---
 # (tun0 v6 tasimadigi icin v6'yi tunele sokmak yerine kapatip v4'e zorluyoruz.)
 nft add rule inet warp_route output6 meta nfproto ipv6 ip6 daddr @warp_hosts6 counter reject with icmpv6 type admin-prohibited
-if [ -n "\$SLICE_REL_PATH" ]; then
-    nft "add rule inet warp_route output6 meta nfproto ipv6 socket cgroupv2 level \$SLICE_LEVEL \\"\$SLICE_REL_PATH\\" counter reject with icmpv6 type admin-prohibited"
+if [ -n "$SLICE_REL_PATH" ]; then
+    nft "add rule inet warp_route output6 meta nfproto ipv6 socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter reject with icmpv6 type admin-prohibited"
 fi
 
 # PREROUTING: conf'taki iface'ler WARP'a gider.
 IFACE_COUNT=0
-if [ -f "\$ROUTE_CONF" ]; then
-    while IFS= read -r line || [ -n "\$line" ]; do
-        line="\${line%%#*}"
-        [ -z "\${line// /}" ] && continue
-        if [[ "\$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
-            iface="\${BASH_REMATCH[1]}"
-            nft add rule inet warp_route prerouting iifname "\$iface" counter mark set "\$WARP_MARK"
-            IFACE_COUNT=\$((IFACE_COUNT + 1))
+if [ -f "$ROUTE_CONF" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%%#*}"
+        [ -z "${line// /}" ] && continue
+        if [[ "$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
+            iface="${BASH_REMATCH[1]}"
+            nft add rule inet warp_route prerouting iifname "$iface" counter meta mark set "$WARP_MARK"
+            IFACE_COUNT=$((IFACE_COUNT + 1))
         fi
-    done < "\$ROUTE_CONF"
+    done < "$ROUTE_CONF"
 fi
 
 # dnsmasq: config uret ve baslat.
@@ -190,11 +198,11 @@ pkill -f "dnsmasq.*warp" 2>/dev/null || true
 dnsmasq -C /etc/dnsmasq-warp.conf --pid-file=/run/dnsmasq-warp.pid
 
 # Resolved'i dnsmasq'a yonlendir.
-resolvectl dns "\$DEV" 127.0.0.2
-resolvectl domain "\$DEV" "~."
-resolvectl default-route "\$DEV" true
+resolvectl dns "$DEV" 127.0.0.2
+resolvectl domain "$DEV" "~."
+resolvectl default-route "$DEV" true
 
-echo "WARP on (\$MODE) gw=\$GW dev=\$DEV warp_iface=\$IFACE_COUNT slice=\${SLICE_REL_PATH:-?}"
+echo "WARP on ($MODE) gw=$GW dev=$DEV user=$USER_NAME warp_iface=$IFACE_COUNT slice=${SLICE_REL_PATH:-?}"
 EOF
 chmod 755 /usr/local/bin/warp-on
 
@@ -251,48 +259,59 @@ chmod 755 /usr/local/bin/warp-off
 
 #=== /usr/local/bin/warp-bypass-reload ========================================
 say "Writing /usr/local/bin/warp-bypass-reload…"
-cat > /usr/local/bin/warp-bypass-reload << EOF
+cat > /usr/local/bin/warp-bypass-reload << 'EOF'
 #!/usr/bin/env bash
 # Conf degisikligi sonrasi iface WARP kurallarini WARP'i kesmeden uygular.
 # Designed to run as root via sudoers NOPASSWD.
 set -e
 
-ROUTE_CONF="$TARGET_HOME/.config/warp-route.conf"
 WARP_MARK=0x43
+
+# Hedef kullaniciyi runtime'da belirle (hardcode yok).
+USER_NAME="${SUDO_USER:-}"
+{ [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; } && USER_NAME=$(id -nu 1000 2>/dev/null)
+USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+ROUTE_CONF="$USER_HOME/.config/warp-route.conf"
 
 nft list table inet warp_route >/dev/null 2>&1 || { echo "warp-route-reload: WARP not active, skip"; exit 0; }
 
 nft flush chain inet warp_route prerouting
 
 IFACE_COUNT=0
-if [ -f "\$ROUTE_CONF" ]; then
-    while IFS= read -r line || [ -n "\$line" ]; do
-        line="\${line%%#*}"
-        [ -z "\${line// /}" ] && continue
-        if [[ "\$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
-            iface="\${BASH_REMATCH[1]}"
-            nft add rule inet warp_route prerouting iifname "\$iface" counter mark set "\$WARP_MARK"
-            IFACE_COUNT=\$((IFACE_COUNT + 1))
+if [ -f "$ROUTE_CONF" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%%#*}"
+        [ -z "${line// /}" ] && continue
+        if [[ "$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
+            iface="${BASH_REMATCH[1]}"
+            nft add rule inet warp_route prerouting iifname "$iface" counter meta mark set "$WARP_MARK"
+            IFACE_COUNT=$((IFACE_COUNT + 1))
         fi
-    done < "\$ROUTE_CONF"
+    done < "$ROUTE_CONF"
 fi
 
-echo "warp-route reloaded: iface_count=\$IFACE_COUNT"
+echo "warp-route reloaded: iface_count=$IFACE_COUNT"
 EOF
 chmod 755 /usr/local/bin/warp-bypass-reload
 
 #=== /usr/local/bin/warp-dnsmasq-gen ==========================================
 say "Writing /usr/local/bin/warp-dnsmasq-gen…"
-cat > /usr/local/bin/warp-dnsmasq-gen << EOF
+cat > /usr/local/bin/warp-dnsmasq-gen << 'EOF'
 #!/usr/bin/env bash
 # warp-blacklist.txt'ten dnsmasq nftset config'i uret.
-# Her domain icin DNS sorgusu aninda warp_hosts set'ine IP eklenir.
+# Her domain icin DNS sorgusu aninda warp_hosts (v4) ve warp_hosts6 (v6)
+# set'lerine IP eklenir. v6 set'i fail-closed reject icin kullanilir.
 # Runs as root via sudoers NOPASSWD.
 
-BLACKLIST="$TARGET_HOME/.config/warp-blacklist.txt"
+# Hedef kullaniciyi runtime'da belirle (hardcode yok).
+USER_NAME="${SUDO_USER:-}"
+{ [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; } && USER_NAME=$(id -nu 1000 2>/dev/null)
+USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
+
+BLACKLIST="$USER_HOME/.config/warp-blacklist.txt"
 OUTPUT="/etc/dnsmasq-warp.conf"
 
-cat > "\$OUTPUT" << 'HEADER'
+cat > "$OUTPUT" << 'HEADER'
 # dnsmasq-warp.conf — warp-on tarafindan olusturulur, elle duzenleme.
 listen-address=127.0.0.2
 bind-interfaces
@@ -306,21 +325,21 @@ cache-size=1000
 log-queries=no
 HEADER
 
-if [ ! -f "\$BLACKLIST" ]; then
-    echo "warp-dnsmasq-gen: blacklist bulunamadi: \$BLACKLIST, bos config yaziliyor" >&2
+if [ ! -f "$BLACKLIST" ]; then
+    echo "warp-dnsmasq-gen: blacklist bulunamadi: $BLACKLIST, bos config yaziliyor" >&2
     exit 0
 fi
 
 # Wildcard'lari soy, deduplicate et, v4+v6 nftset satirlari olustur.
-while IFS= read -r line || [ -n "\$line" ]; do
-    line=\$(printf '%s' "\$line" | tr -d '\r' | sed 's/#.*//' | xargs)
-    [ -z "\$line" ] && continue
-    domain="\${line#\*.}"
-    printf 'nftset=/%s/4#inet#warp_route#warp_hosts\n' "\$domain"
-    printf 'nftset=/%s/6#inet#warp_route#warp_hosts6\n' "\$domain"
-done < "\$BLACKLIST" | sort -u >> "\$OUTPUT"
+while IFS= read -r line || [ -n "$line" ]; do
+    line=$(printf '%s' "$line" | tr -d '\r' | sed 's/#.*//' | xargs)
+    [ -z "$line" ] && continue
+    domain="${line#\*.}"
+    printf 'nftset=/%s/4#inet#warp_route#warp_hosts\n' "$domain"
+    printf 'nftset=/%s/6#inet#warp_route#warp_hosts6\n' "$domain"
+done < "$BLACKLIST" | sort -u >> "$OUTPUT"
 
-echo "warp-dnsmasq-gen: \$(grep -c '^nftset' "\$OUTPUT") nftset satiri yazildi -> \$OUTPUT"
+echo "warp-dnsmasq-gen: $(grep -c '^nftset' "$OUTPUT") nftset satiri yazildi -> $OUTPUT"
 EOF
 chmod 755 /usr/local/bin/warp-dnsmasq-gen
 
