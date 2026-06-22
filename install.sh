@@ -77,6 +77,7 @@ WARP_MARK=0x43
 USER_NAME="$TARGET_USER"
 USER_UID="$TARGET_UID"
 SLICE_NAME="warp-only.slice"
+RUN_DIR="/run/warp"
 
 GW=\$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print \$3; exit}')
 DEV=\$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print \$5; exit}')
@@ -108,7 +109,11 @@ ip route add default dev tun0 table "\$WARP_TABLE"
 ip rule del fwmark "\$WARP_MARK" 2>/dev/null || true
 ip rule add fwmark "\$WARP_MARK" table "\$WARP_TABLE" priority 100
 
-# rp_filter loosening — asimetrik routing icin gerekli.
+# rp_filter: asimetrik routing icin gevsetilir. Mevcut deger saklanir, warp-off geri yukler.
+mkdir -p "\$RUN_DIR" 2>/dev/null || true
+sysctl -n net.ipv4.conf.all.rp_filter > "\$RUN_DIR/rpfilter.all" 2>/dev/null || true
+sysctl -n "net.ipv4.conf.\${DEV}.rp_filter" > "\$RUN_DIR/rpfilter.dev" 2>/dev/null || true
+printf '%s\\n' "\$DEV" > "\$RUN_DIR/rpfilter.devname" 2>/dev/null || true
 sysctl -wq net.ipv4.conf.all.rp_filter=2
 sysctl -wq "net.ipv4.conf.\${DEV}.rp_filter=2" 2>/dev/null || true
 
@@ -135,16 +140,34 @@ nft -- add chain inet warp_route prerouting '{ type filter hook prerouting prior
 nft -- add chain inet warp_route postrouting '{ type filter hook postrouting priority -150 ; }'
 # TCP MSS clamp: tun0 MTU=1280 vs LAN MTU=1500 uyusmazligini onler (TLS handshake drop).
 nft add rule inet warp_route postrouting oifname tun0 tcp flags syn tcp option maxseg size set 1220
-nft -- add chain inet warp_route output     '{ type route  hook output     priority -150 ; }'
+# IPv4 mark/route zinciri.
+nft -- add chain inet warp_route output  '{ type route  hook output priority -150 ; }'
+# IPv6 fail-closed zinciri (ayri filter chain, reject icin).
+nft -- add chain inet warp_route output6 '{ type filter hook output priority -150 ; }'
 
-# Domain tabanli IP set'i — dnsmasq DNS sorgularinda doldurur.
+# Domain tabanli IP set'leri — dnsmasq DNS sorgularinda doldurur. Timeout 1h.
 nft add set inet warp_route warp_hosts \\
-    '{ type ipv4_addr ; flags interval,timeout ; timeout 300s ; }'
-nft add rule inet warp_route output ip daddr @warp_hosts counter mark set "\$WARP_MARK"
+    '{ type ipv4_addr ; flags interval,timeout ; timeout 3600s ; }'
+nft add set inet warp_route warp_hosts6 \\
+    '{ type ipv6_addr ; flags interval,timeout ; timeout 3600s ; }'
 
-# Cgroup tabanli — warp-only.slice'taki app'lar WARP'a gider.
+# --- IPv4: conntrack mark save/restore + marking (output, type route) ---
+# 1) Established baglanti: bizim connmark'imiz varsa packet mark'a geri yukle.
+#    Boylece set TTL'i dolsa bile aktif baglanti WARP'ta kalir (kopmaz/leak olmaz).
+nft add rule inet warp_route output ct mark "\$WARP_MARK" meta mark set "\$WARP_MARK"
+# 2) Blacklist domainleri ve cgroup app'larini damgala.
+nft add rule inet warp_route output ip daddr @warp_hosts counter meta mark set "\$WARP_MARK"
 if [ -n "\$SLICE_REL_PATH" ]; then
-    nft "add rule inet warp_route output socket cgroupv2 level \$SLICE_LEVEL \\"\$SLICE_REL_PATH\\" counter mark set \$WARP_MARK"
+    nft "add rule inet warp_route output socket cgroupv2 level \$SLICE_LEVEL \\"\$SLICE_REL_PATH\\" counter meta mark set \$WARP_MARK"
+fi
+# 3) Bizim mark'imizi connmark'a kaydet (sonraki paketler restore edebilsin).
+nft add rule inet warp_route output meta mark "\$WARP_MARK" ct mark set "\$WARP_MARK"
+
+# --- IPv6 fail-closed: WARP'lik v6 trafigini reddet -> app v4'e duser -> WARP ---
+# (tun0 v6 tasimadigi icin v6'yi tunele sokmak yerine kapatip v4'e zorluyoruz.)
+nft add rule inet warp_route output6 meta nfproto ipv6 ip6 daddr @warp_hosts6 counter reject with icmpv6 type admin-prohibited
+if [ -n "\$SLICE_REL_PATH" ]; then
+    nft "add rule inet warp_route output6 meta nfproto ipv6 socket cgroupv2 level \$SLICE_LEVEL \\"\$SLICE_REL_PATH\\" counter reject with icmpv6 type admin-prohibited"
 fi
 
 # PREROUTING: conf'taki iface'ler WARP'a gider.
@@ -185,6 +208,7 @@ cat > /usr/local/bin/warp-off << 'EOF'
 MASQUE_IP="162.159.198.2"
 WARP_TABLE=201
 WARP_MARK=0x43
+RUN_DIR="/run/warp"
 
 PHYS_DEV=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $5; exit}')
 [ -z "$PHYS_DEV" ] && PHYS_DEV=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
@@ -203,6 +227,16 @@ ip route flush table "$WARP_TABLE" 2>/dev/null || true
 
 nft delete table inet warp_route 2>/dev/null || true
 nft delete table ip warp_nat 2>/dev/null || true
+
+# rp_filter: warp-on'un sakladigi degerleri geri yukle.
+if [ -f "$RUN_DIR/rpfilter.all" ]; then
+    sysctl -wq "net.ipv4.conf.all.rp_filter=$(cat "$RUN_DIR/rpfilter.all")" 2>/dev/null || true
+fi
+SAVED_DEV=$(cat "$RUN_DIR/rpfilter.devname" 2>/dev/null)
+if [ -n "$SAVED_DEV" ] && [ -f "$RUN_DIR/rpfilter.dev" ]; then
+    sysctl -wq "net.ipv4.conf.${SAVED_DEV}.rp_filter=$(cat "$RUN_DIR/rpfilter.dev")" 2>/dev/null || true
+fi
+rm -f "$RUN_DIR"/rpfilter.* 2>/dev/null || true
 
 [ -n "$PHYS_DEV" ] && resolvectl revert "$PHYS_DEV" 2>/dev/null || true
 
@@ -277,12 +311,13 @@ if [ ! -f "\$BLACKLIST" ]; then
     exit 0
 fi
 
-# Wildcard'lari soy, deduplicate et, nftset satirlari olustur.
+# Wildcard'lari soy, deduplicate et, v4+v6 nftset satirlari olustur.
 while IFS= read -r line || [ -n "\$line" ]; do
     line=\$(printf '%s' "\$line" | tr -d '\r' | sed 's/#.*//' | xargs)
     [ -z "\$line" ] && continue
     domain="\${line#\*.}"
     printf 'nftset=/%s/4#inet#warp_route#warp_hosts\n' "\$domain"
+    printf 'nftset=/%s/6#inet#warp_route#warp_hosts6\n' "\$domain"
 done < "\$BLACKLIST" | sort -u >> "\$OUTPUT"
 
 echo "warp-dnsmasq-gen: \$(grep -c '^nftset' "\$OUTPUT") nftset satiri yazildi -> \$OUTPUT"
@@ -297,10 +332,19 @@ cat > /usr/local/bin/warp-dns-reload << 'EOF'
 # Runs as root via sudoers NOPASSWD.
 set -e
 
+# WARP acik degilse nftset hedef tablosu (inet warp_route) yok — yenileme anlamsiz.
+if ! nft list table inet warp_route >/dev/null 2>&1; then
+    echo "warp-dns-reload: WARP kapali, atlandi" >&2
+    exit 0
+fi
+
 pkill -f "dnsmasq.*warp" 2>/dev/null || true
 sleep 0.3
 /usr/local/bin/warp-dnsmasq-gen
 dnsmasq -C /etc/dnsmasq-warp.conf --pid-file=/run/dnsmasq-warp.pid
+# systemd-resolved cache'ini bosalt — yeni blacklist domainleri taze sorgulanip
+# warp_hosts'a eklensin (yoksa cache'li eski IP fiziksel'den gider).
+resolvectl flush-caches 2>/dev/null || true
 echo "DNS reloaded"
 EOF
 chmod 755 /usr/local/bin/warp-dns-reload
@@ -819,6 +863,9 @@ class WarpTray:
         self.rebuild_blacklist_menu()
 
     def reload_dns(self):
+        if current_mode() is None:
+            notify("WARP Blacklist", "Önce WARP'ı aç — kapalıyken DNS yenilenmez.")
+            return
         subprocess.Popen(DNS_RELOAD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         notify("WARP Blacklist", "DNS yenileniyor…")
 

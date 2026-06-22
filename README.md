@@ -54,6 +54,9 @@ dnsmasq + nftables      ─── blacklist domains (nhentai, xvideos, etc.)
 - **Domain routing**: a dnsmasq instance on `127.0.0.2:53` uses Yandex's port-1253 DNS to bypass Turkish ISP port-53 interception. For each blacklisted domain, DNS responses populate an nftables `warp_hosts` IP set. Traffic to those IPs gets the same fwmark.
 - **Interface routing**: `iface` entries in `warp-route.conf` apply an nftables PREROUTING rule.
 - **TCP MSS clamp**: tun0 MTU=1280 vs LAN MTU=1500. Without clamping, large TLS handshake packets get dropped silently. Fixed with `tcp option maxseg size set 1220` in POSTROUTING.
+- **Connection persistence (conntrack mark)**: the fwmark is saved to the connection's conntrack entry and restored on every packet. So an established connection keeps routing through WARP even if the `warp_hosts` set entry expires (300s→1h TTL) mid-stream — no mid-connection drop or leak.
+- **IPv6 fail-closed**: tun0 carries IPv4 only. To prevent leaks, IPv6 traffic that *would* go through WARP (blacklist domains via `warp_hosts6`, or cgroup apps) is `reject`ed with ICMPv6 admin-prohibited, forcing the app to fall back to IPv4 — which goes through WARP. A censorship-bypass tool must fail closed, not leak.
+- **rp_filter**: loosened to `2` (needed for the asymmetric WARP/physical routing) and the original value is saved to `/run/warp` and restored by `warp-off`.
 
 ---
 
