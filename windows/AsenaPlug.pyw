@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""warp-tray — Windows giriş noktası (ince).
+"""AsenaPlug — Windows giriş noktası (ince).
 
 İlk çalıştırmada kurulum (admin gerekir), sonra tray olarak çalışır.
 Tüm mantık `warp_tray/` paketinde. PyInstaller ile tek exe'ye paketlenir;
-geliştirme için `pythonw warp-tray.pyw` ile de çalışır.
+geliştirme için `pythonw AsenaPlug.pyw` ile de çalışır.
 """
 import sys
 from pathlib import Path
@@ -18,21 +18,21 @@ from warp_tray.tray import WarpTray  # noqa: E402
 def _msgbox_question(text: str) -> bool:
     from PySide6.QtWidgets import QApplication, QMessageBox
     QApplication.instance() or QApplication(sys.argv)
-    ret = QMessageBox.question(None, "warp-tray Kurulum", text)
+    ret = QMessageBox.question(None, "AsenaPlug Kurulum", text)
     return ret == QMessageBox.StandardButton.Yes
 
 
 def _msgbox_error(text: str):
     from PySide6.QtWidgets import QApplication, QMessageBox
     QApplication.instance() or QApplication(sys.argv)
-    QMessageBox.critical(None, "warp-tray Kurulum Hatası", text)
+    QMessageBox.critical(None, "AsenaPlug Kurulum Hatası", text)
 
 
 def main():
     if install.needs_setup():
         if not win.is_admin():
             if not _msgbox_question(
-                "warp-tray ilk kurulum için yönetici yetkisi gerektirir.\n"
+                "AsenaPlug ilk kurulum için yönetici yetkisi gerektirir.\n"
                 "Devam edilsin mi?"
             ):
                 sys.exit(0)

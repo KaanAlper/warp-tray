@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont, QIcon, Q
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
 from . import state, win
-from .paths import BLACKLIST_PATH
+from .paths import BLACKLIST_PATH, APP_NAME
 
 TRAY_REF = None  # win.notify fallback'ı için
 
@@ -237,10 +237,10 @@ class WarpTray:
 
     def reload_dns(self):
         if state.current_state() is None:
-            win.notify("WARP Blacklist", "Önce WARP'ı aç.")
+            win.notify(f"{APP_NAME} Blacklist", f"Önce {APP_NAME}'ı aç.")
             return
         win.run_script("warp-dns-reload.ps1")
-        win.notify("WARP Blacklist", "DNS yenileniyor…")
+        win.notify(f"{APP_NAME} Blacklist", "DNS yenileniyor…")
 
     # ------------------------------------------------------------------ poll
     def refresh(self):
@@ -250,11 +250,11 @@ class WarpTray:
 
         if active:
             detail = f"{_T_LABEL[st['transport']]} · {_S_LABEL[st['scope']]}"
-            self.tray.setToolTip(f"WARP: Connected ({detail})")
+            self.tray.setToolTip(f"{APP_NAME}: Connected ({detail})")
             self.toggle_action.setText("Disconnect")
             self.status_action.setText(f"Durum: Bağlı — {detail}")
         else:
-            self.tray.setToolTip("WARP: Disconnected")
+            self.tray.setToolTip(f"{APP_NAME}: Disconnected")
             self.toggle_action.setText("Connect")
             self.status_action.setText("Durum: Bağlı değil")
 
@@ -268,9 +268,9 @@ class WarpTray:
 
         if self._initialized and st != self._last_state:
             if active:
-                win.notify("WARP", f"Connected ({_T_LABEL[st['transport']]} · {_S_LABEL[st['scope']]})")
+                win.notify(APP_NAME, f"Connected ({_T_LABEL[st['transport']]} · {_S_LABEL[st['scope']]})")
             else:
-                win.notify("WARP", "Disconnected")
+                win.notify(APP_NAME, "Disconnected")
         self._last_state = st
         self._initialized = True
 

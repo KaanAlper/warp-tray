@@ -12,7 +12,7 @@ import ctypes
 import subprocess
 import sys
 
-from .paths import SCRIPTS_DIR
+from .paths import SCRIPTS_DIR, APP_NAME
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -115,7 +115,7 @@ def adapter_exists(name: str) -> bool:
 def notify(title: str, body: str):
     try:
         from winotify import Notification
-        Notification(app_id="warp-tray", title=title, msg=body, duration="short").show()
+        Notification(app_id=APP_NAME, title=title, msg=body, duration="short").show()
     except Exception:
         # winotify yoksa tray fallback'ı tray modülünden gelir
         from . import tray

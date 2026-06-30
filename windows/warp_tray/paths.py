@@ -30,6 +30,10 @@ RESOLVED_FILE  = RUN_DIR / "warp-resolved-ips.txt"   # route-sync IP defteri
 
 TUN_NAME = "usque"
 
+# Kullanıcıya görünen uygulama adı (tray, bildirimler, exe). İç tanımlayıcılar
+# (usque yolları, WarpTray_* görevleri, warp_tray paketi) aynı kalır.
+APP_NAME = "AsenaPlug"
+
 # --- Varsayılan mod ---
 DEFAULT_TRANSPORT = "http2"      # DPI-stealth; TR'de dayanıklı
 DEFAULT_SCOPE     = "selective"  # fiziksel default, sadece blacklist WARP'tan
