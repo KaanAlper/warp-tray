@@ -69,9 +69,11 @@ try {
     Write-Host "PyInstaller çalışıyor..." -ForegroundColor Cyan
     & $pyExe @pyPre -m PyInstaller --noconfirm --clean --onefile --windowed `
         --name AsenaPlug `
+        --icon "assets\AsenaPlug.ico" `
         --paths . `
         --add-data "bundled;bundled" `
         --add-data "scripts;scripts" `
+        --add-data "assets;assets" `
         --hidden-import warp_tray `
         --hidden-import warp_tray.paths `
         --hidden-import warp_tray.win `

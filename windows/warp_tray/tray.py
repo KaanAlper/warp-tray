@@ -8,6 +8,8 @@ Durum tespiti ctypes ile (powershell yok) → 3sn poll bedava, menü anında aç
 Mod geçişleri sihirli singleShot gecikmeleri yerine KOŞUL-BAZLI poll ile yapılır.
 """
 import os
+import sys
+from pathlib import Path
 
 from PySide6.QtCore import QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -22,14 +24,58 @@ _T_LABEL = {"http2": "HTTP/2", "http3": "HTTP/3"}
 _S_LABEL = {"selective": "Sadece blacklist", "full": "Her şey"}
 
 ICON_SIZE = 64
+_GREEN = QColor(76, 175, 80)
+_GRAY = QColor(158, 158, 158)
+
+
+def _asset(name: str) -> Path:
+    """Bundle (PyInstaller _MEIPASS) veya repo'daki assets/."""
+    base = getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent.parent))
+    return Path(base) / "assets" / name
+
+
+_WOLF = None
+
+
+def _wolf_base() -> QPixmap:
+    global _WOLF
+    if _WOLF is None:
+        p = _asset("AsenaPlug.png")
+        _WOLF = QPixmap(str(p)) if p.exists() else QPixmap()
+    return _WOLF
 
 
 def make_icon(connected: bool) -> QIcon:
+    """Asena kurt logosu + sağ altta durum noktası (yeşil=bağlı, gri=değil).
+    Bağlı değilken kurt soluk gösterilir. Logo yoksa 'W' fallback'ı çizilir."""
+    base = _wolf_base()
+    if base.isNull():
+        return _make_icon_fallback(connected)
+
+    canvas = QPixmap(ICON_SIZE, ICON_SIZE)
+    canvas.fill(Qt.GlobalColor.transparent)
+    p = QPainter(canvas)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    wolf = base.scaled(ICON_SIZE, ICON_SIZE, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
+    p.setOpacity(1.0 if connected else 0.45)  # kapalıyken soluk
+    p.drawPixmap((ICON_SIZE - wolf.width()) // 2, (ICON_SIZE - wolf.height()) // 2, wolf)
+    p.setOpacity(1.0)
+    d = ICON_SIZE * 5 // 16  # durum noktası ~20px, sağ alt
+    p.setPen(QPen(QColor(255, 255, 255), 2))
+    p.setBrush(QBrush(_GREEN if connected else _GRAY))
+    p.drawEllipse(QRect(ICON_SIZE - d - 1, ICON_SIZE - d - 1, d, d))
+    p.end()
+    return QIcon(canvas)
+
+
+def _make_icon_fallback(connected: bool) -> QIcon:
     pixmap = QPixmap(ICON_SIZE, ICON_SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    color = QColor(76, 175, 80) if connected else QColor(158, 158, 158)
+    color = _GREEN if connected else _GRAY
     margin = 6
     rect = QRect(margin, margin, ICON_SIZE - 2 * margin, ICON_SIZE - 2 * margin)
     if connected:
@@ -56,6 +102,10 @@ class WarpTray:
         global TRAY_REF
         self.app = QApplication.instance() or QApplication([])
         self.app.setQuitOnLastWindowClosed(False)
+
+        _wp = _asset("AsenaPlug.png")  # dialog/taskbar ikonu
+        if _wp.exists():
+            self.app.setWindowIcon(QIcon(str(_wp)))
 
         self.icon_on = make_icon(True)
         self.icon_off = make_icon(False)
