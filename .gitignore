@@ -13,5 +13,11 @@ usque.log
 __pycache__/
 *.pyc
 
+# PyInstaller / pytest (Windows build artefactları)
+dist/
+build/
+*.spec
+.pytest_cache/
+
 # superpowers plugin scaffolding
 docs/superpowers/

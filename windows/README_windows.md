@@ -1,117 +1,85 @@
-# warp-tray — Windows Port
+# warp-tray — Windows Portu
 
-Windows 10/11 portu. Orijinal: [KaanAlper/warp-tray](https://github.com/KaanAlper/warp-tray) (Arch/Hyprland).
+Windows 10/11 (x64). Cloudflare WARP (MASQUE/usque) için **seçilebilir routing** modlu sistem tepsisi göstergesi. Orijinal: [KaanAlper/warp-tray](https://github.com/KaanAlper/warp-tray) (Arch/Hyprland).
 
-**Fiziksel internet default'tur.** Sadece `warp-route.conf`'taki interfaceler ve `warp-blacklist.txt`'teki domainler WARP'tan geçer.
+## İki eksenli mod
+
+Tray menüsünden bağımsız iki seçim:
+
+| Eksen | Seçenekler | Açıklama |
+|---|---|---|
+| **Routing** | **Sadece blacklist** *(default)* | Fiziksel internet default; yalnız `warp-blacklist.txt`'teki domainler WARP'tan geçer. |
+| | **Her şey** | Tüm trafik WARP'tan geçer (split-default + endpoint pin). |
+| **Transport** | **HTTP/2** *(default)* | TCP+TLS; DPI'ya dayanıklı (TR'de önerilir). |
+| | **HTTP/3** | QUIC/UDP; daha düşük gecikme ama UDP 443 throttle yiyebilir. |
 
 ---
 
 ## Gereksinimler
 
-| Gereksinim | Açıklama |
+| | |
 |---|---|
-| Windows 10/11 x64 | Admin yetkisi gerekli |
-| Python 3.10+ | [python.org](https://python.org) |
-| Go 1.22+ | usque build için — [go.dev](https://go.dev/dl/) |
-| Git | usque clone için |
+| Windows 10/11 x64 | Kurulum admin (UAC) ister |
+| Python 3.10+ **(yalnız kaynaktan çalıştırırken)** | PyInstaller exe için gerekmez |
+| `PySide6`, `winotify` (pip) | exe içine paketlenir |
+
+`usque.exe`, `wintun.dll`, `dnsproxy.exe` **repo'da gömülü gelir** (`windows/bundled/`) — runtime'da hiçbir şey indirilmez.
 
 ---
 
 ## Kurulum
 
-**Yönetici PowerShell'de:**
+> **`install.ps1` YOK.** Kurulum, exe/`.pyw` ilk çalıştırıldığında otomatik yapılır.
+
+**Seçenek A — PyInstaller exe (kullanıcı için önerilen):**
 
 ```powershell
-# Repoyu clone et
-git clone https://github.com/KaanAlper/warp-tray.git
-cd warp-tray\windows
-
-# Kurulumu başlat (admin gerekli)
-.\install.ps1
+cd windows
+.\build.ps1          # warp-tray.exe üretir (dist\warp-tray.exe)
+.\dist\warp-tray.exe # ilk çalıştırma: UAC -> kurulum -> tray
 ```
 
-Installer şunları yapar:
-1. `usque.exe` — Go ile source'dan build eder (MASQUE/HTTP2 tüneli)
-2. `wintun.dll` — TUN adapter driver (Cloudflare/WireGuard kullanan)
-3. `dnsproxy.exe` — Domain blacklist için DNS interceptor
-4. PowerShell scriptleri kopyalar
-5. Task Scheduler görevleri oluşturur (sudoers NOPASSWD eşdeğeri)
-6. Python bağımlılıklarını kurar (`PySide6`, `winotify`)
-7. `usque register` çalıştırır (`config.json` oluşturur — **YEDEKLE!**)
-8. Windows Startup'a ekler
+**Seçenek B — kaynaktan (geliştirme):**
+
+```powershell
+cd windows
+pip install PySide6 winotify
+pythonw .\warp-tray.pyw
+```
+
+İlk çalıştırma (admin) şunları yapar:
+1. `usque.exe` + `wintun.dll` + `dnsproxy.exe` → `C:\Program Files\usque\`
+2. PowerShell scriptleri → `C:\Program Files\usque\scripts\`
+3. `%ProgramData%\usque`'ye ACL (kullanıcı tray'i config yazabilsin, SYSTEM okuyabilsin)
+4. Task Scheduler görevleri:
+   - `WarpTray_Tray` — logon'da tray'i **yükseltilmiş (Highest)** başlatır (autostart + admin; kullanıcı yerel admin ise UAC promptu yok)
+   - `WarpTray_RouteSync` — SYSTEM daemon (blacklist /32 + IPv6 fail-closed)
+   - `WarpTray_Rescue` — boot+logon SYSTEM kurtarma (DNS/route artığı temizle)
+5. `usque register` → `%ProgramData%\usque\config\config.json` (**YEDEKLE!**)
+
+> **Privilege modeli:** Tray elevated çalışır ve `warp-*.ps1`'i doğrudan admin olarak
+> koşar. Eski "standart kullanıcı SYSTEM task tetikler" sorunu (ve kırılgan SDDL/ACL
+> ayarı) böylece tamamen elenir.
 
 ---
 
-## Manuel kurulum (usque.exe build)
+## Mimari (Linux ↔ Windows)
 
-Installer build edemediyse kendi makinende:
-
-```bash
-# Linux/WSL2'de cross-compile
-git clone https://github.com/Diniboy1123/usque.git
-cd usque
-GOOS=windows GOARCH=amd64 go build -o usque.exe .
-```
-
-Sonra `usque.exe` + `wintun.dll`'i `C:\Program Files\usque\` klasörüne koy.
-
-`wintun.dll` için: [wintun.net](https://www.wintun.net/) → `wintun/bin/amd64/wintun.dll`
-
----
-
-## Linux ↔ Windows karşılaştırması
-
-| Özellik | Linux (orijinal) | Windows (bu port) |
+| Özellik | Linux | Windows (bu port) |
 |---|---|---|
-| Tünel | `usque` (MASQUE/HTTP2) | `usque.exe` (aynı — Windows build var) |
-| Routing | `nftables` + `iproute2` | `netsh` + `New-NetRoute` |
-| Domain blacklist | `dnsmasq` + nftset | `dnsproxy` + /32 route tablosu |
-| Per-app routing | `systemd cgroup` + fwmark | **YOK** — Windows'ta kernel driver gerekir |
-| Interface routing | nftables PREROUTING | route metric manipülasyonu |
-| Yönetici komutları | `sudoers NOPASSWD` | Task Scheduler (SYSTEM olarak çalışır) |
-| Bildirimler | `notify-send` | `winotify` (Win10 toast) |
-| Autostart | Hyprland `exec-once` | Windows Startup klasörü |
-| Tünel check | `ip link show tun0` | `Get-NetAdapter 'usque'` |
-| Mode detection | `pgrep -af usque` | `Get-WmiObject Win32_Process` |
+| Tünel | `usque` MASQUE | `usque.exe` (aynı) |
+| TUN | wireguard/wintun | `wintun.dll` |
+| Selective (domain) | `dnsmasq` + nftset | `dnsproxy` + `/32` route (route-sync) |
+| Full tunnel | tablo + default | split-default `0.0.0.0/1`+`128.0.0.0/1` |
+| Endpoint koruması | fwmark | endpoint `/32` fiziksel'de pin |
+| IPv6 leak | nft reject | outbound firewall block (fail-closed) |
+| **Per-app routing** | cgroup + fwmark | **YOK** (Windows'ta kernel driver/WFP gerekir) |
+| Yönetici komut | sudoers NOPASSWD | Task Scheduler (SYSTEM) |
+| Durum tespiti | `ip link` | ctypes `GetAdaptersAddresses` (powershell yok) |
+| Bildirim | notify-send | winotify |
+| Autostart | Hyprland exec-once | Startup klasörü (VBS) |
 
----
-
-## Kullanım
-
-Tray ikonu sistem tepsisinde görünür (beyaz/gri "W" kapalı, yeşil "W" açık).
-
-| İşlem | Nasıl |
-|---|---|
-| WARP toggle | Sol tık |
-| HTTP/2 bağlan | Sağ tık → HTTP/2 |
-| HTTP/3 bağlan | Sağ tık → HTTP/3 |
-| Bağlantıyı kes | Sağ tık → Disconnect |
-| Interface WARP'a ekle | Sağ tık → Force WARP → Add adapter |
-| Domain ekle | Sağ tık → Blacklist → Domain ekle… |
-| DNS yenile | Sağ tık → Blacklist → DNS yenile |
-
-### HTTP/2 vs HTTP/3
-
-| | HTTP/2 (TCP+TLS) | HTTP/3 (QUIC/UDP) |
-|---|---|---|
-| DPI direnci (TR) | Yüksek — normal HTTPS gibi görünür | Düşük — UDP 443 throttle yiyor |
-| Gecikme | 2–3 RTT | 0–1 RTT |
-| Default | ✓ | |
-
----
-
-## Domain blacklist
-
-`%APPDATA%\warp-tray\warp-blacklist.txt` — satır başına bir domain:
-
-```
-nhentai.net
-twitter.com
-reddit.com
-```
-
-DNS yenile tıklayınca bu domainler `/32` route olarak TUN'a eklenir.  
-(Linux'taki nftset gibi gerçek zamanlı değil — her 5 dakikada + manuel yenile.)
+> **Not:** Linux'taki per-app (Discord-only) routing Windows'ta yoktur. Onun yerine "Her şey" (full tunnel) modu var.
 
 ---
 
@@ -119,38 +87,25 @@ DNS yenile tıklayınca bu domainler `/32` route olarak TUN'a eklenir.
 
 | Yol | Açıklama |
 |---|---|
-| `C:\Program Files\usque\usque.exe` | MASQUE tünel |
-| `C:\Program Files\usque\wintun.dll` | TUN driver |
-| `C:\Program Files\usque\dnsproxy.exe` | DNS interceptor |
-| `C:\Program Files\usque\scripts\warp-on.ps1` | Tüneli başlat |
-| `C:\Program Files\usque\scripts\warp-off.ps1` | Tüneli durdur |
-| `C:\Program Files\usque\scripts\warp-bypass-reload.ps1` | Interface routing yenile |
-| `C:\Program Files\usque\scripts\warp-dns-reload.ps1` | DNS + route yenile |
-| `C:\Program Files\usque\scripts\warp-route-sync.ps1` | Domain IP'lerini route et (5 dk'da bir) |
-| `C:\Program Files\usque\warp-tray.pyw` | Tray uygulaması |
-| `%APPDATA%\warp-tray\warp-route.conf` | Interface routing config |
-| `%APPDATA%\warp-tray\warp-blacklist.txt` | Domain blacklist |
-| `%USERPROFILE%\config.json` | usque cihaz kimliği — **YEDEKLE!** |
-| `%ProgramData%\usque\usque.log` | Tünel logları |
+| `C:\Program Files\usque\{usque,dnsproxy}.exe, wintun.dll` | Binary'ler |
+| `C:\Program Files\usque\scripts\*.ps1` | warp-on/off/dns-reload/route-sync/rescue |
+| `%ProgramData%\usque\config\config.json` | usque kimliği — **YEDEKLE** |
+| `%ProgramData%\usque\config\warp-blacklist.txt` | Domain blacklist |
+| `%ProgramData%\usque\run\state.json` | Gerçek durum (tray buradan okur) |
+| `%ProgramData%\usque\run\desired.json` | Tray'in istediği mod |
+| `%ProgramData%\usque\usque.log` | Loglar |
 
 ---
 
 ## Kaldırma
 
 ```powershell
-# Task Scheduler görevleri
-"WarpTray_On_HTTP2","WarpTray_On_HTTP3","WarpTray_Off",
-"WarpTray_BypassReload","WarpTray_DnsReload","WarpTray_RouteSync" |
-    ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false }
-
-# Startup
-Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\warp-tray.vbs"
-
-# Program dosyaları
-Remove-Item "C:\Program Files\usque" -Recurse
+"WarpTray_Tray","WarpTray_RouteSync","WarpTray_Rescue" |
+    ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue }
+Remove-Item "C:\Program Files\usque" -Recurse -Force
+# %ProgramData%\usque\config\config.json kimliğin orada — silmeden önce yedekle.
+Remove-Item "C:\ProgramData\usque" -Recurse -Force
 ```
-
-`%USERPROFILE%\config.json` silinmez — WARP kimliğin orada.
 
 ---
 

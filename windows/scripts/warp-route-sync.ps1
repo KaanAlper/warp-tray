@@ -1,68 +1,125 @@
-#Requires -RunAsAdministrator
+ï»¿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Sürekli çalýþan arka plan DNS-Route eþleyici (Daemon Mode).
-    WARP açýk olduðu sürece çalýþýr, blacklist'teki domainleri sürekli çözer
-    ve anýnda TUN adaptörüne yönlendirir.
-#>
+    Selective mod watchdog'u. WARP aÃ§Ä±k olduÄŸu sÃ¼rece blacklist domainlerini
+    sÃ¼rekli Ã§Ã¶zer:
+      IPv4 -> /32 route TUN'a (yeni ekle, kalÄ±cÄ± kaybolanÄ± prune et)
+      IPv6 -> outbound firewall block (fail-closed: uygulama IPv4'e dÃ¼ÅŸer -> WARP)
 
-Set-StrictMode -Version Latest
+    Daemon: in-memory durum dÃ¶ngÃ¼ler arasÄ± korunur (round-robin flap Ã¶nleme).
+#>
+Set-StrictMode -Version 1.0
 $ErrorActionPreference = "SilentlyContinue"
 
-$BLACKLIST_TXT = "$env:APPDATA\warp-tray\warp-blacklist.txt"
-$RESOLVED_FILE = "$env:ProgramData\usque\run\warp-resolved-ips.txt"
-$TUN_NAME      = "usque"
+$DataDir       = Join-Path $env:ProgramData "usque"
+$ConfigDir     = Join-Path $DataDir "config"
+$RunDir        = Join-Path $DataDir "run"
+$LogFile       = Join-Path $DataDir "usque.log"
+$BlacklistTxt  = Join-Path $ConfigDir "warp-blacklist.txt"
+$ResolvedFile  = Join-Path $RunDir "warp-resolved-ips.txt"
+$TunName       = "usque"
+$V6Rule        = "WarpTray-IPv6-FailClosed"
+$PruneAfter    = 3      # bir IP bu kadar dÃ¶ngÃ¼ gÃ¶rÃ¼nmezse route'u kaldÄ±r
+$SleepSeconds  = 15
 
-$knownIPs = @{}
-if (Test-Path $RESOLVED_FILE) {
-    Get-Content $RESOLVED_FILE | ForEach-Object {
-        if ($_.Trim()) { $knownIPs[$_.Trim()] = $true }
-    }
+function Write-Log($msg) {
+    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    Add-Content -Path $LogFile -Value "$ts  [route-sync] $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-# Sonsuz döngü (WARP kapanana veya görev sonlandýrýlana kadar çalýþýr)
+# Yeniden baÅŸlatmada mevcut route'larla senkron ol
+$routed = @{}
+if (Test-Path $ResolvedFile) {
+    Get-Content $ResolvedFile | ForEach-Object {
+        $ip = $_.Trim(); if ($ip) { $routed[$ip] = $true }
+    }
+}
+$miss = @{}
+$lastV6Key = ""
+
+Write-Log "baÅŸladÄ±."
+
 while ($true) {
-    $tunAdapter = Get-NetAdapter -Name $TUN_NAME -ErrorAction SilentlyContinue
-    if (-not $tunAdapter) {
-        # WARP kapalýysa scripti sonlandýr
-        exit 0
+    if (-not (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
+        Write-Log "TUN yok â€” Ã§Ä±kÄ±lÄ±yor."
+        break
     }
 
-    if (Test-Path $BLACKLIST_TXT) {
-        $domains = Get-Content $BLACKLIST_TXT |
-            Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() -ne '' } |
-            ForEach-Object { $_ -replace '^\*\.', '' } | Sort-Object -Unique
+    $domains = @()
+    if (Test-Path $BlacklistTxt) {
+        $domains = Get-Content $BlacklistTxt |
+            ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+            Where-Object { $_ -ne '' } |
+            ForEach-Object { ($_ -replace '^\*\.', '').TrimEnd('.') } |
+            Sort-Object -Unique
+    }
 
-        $added = 0
-        $currentNewIPs = [System.Collections.Generic.List[string]]::new()
+    $desiredV4 = @{}
+    $v6set = New-Object System.Collections.Generic.HashSet[string]
 
-        foreach ($domain in $domains) {
-            try {
-                $resolved = [System.Net.Dns]::GetHostAddresses($domain) |
-                    Where-Object { $_.AddressFamily -eq 'InterNetwork' } |
-                    ForEach-Object { $_.ToString() }
-
-                foreach ($ip in $resolved) {
-                    $currentNewIPs.Add($ip)
-                    if (-not $knownIPs.ContainsKey($ip)) {
-                        # Yeni IP tespit edildi, anýnda route ekle
-                        $existing = Get-NetRoute -DestinationPrefix "$ip/32" -ErrorAction SilentlyContinue
-                        if (-not $existing) {
-                            New-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TUN_NAME -RouteMetric 1 | Out-Null
-                            $added++
-                        }
-                        $knownIPs[$ip] = $true
-                    }
-                }
-            } catch {}
-        }
-
-        if ($added -gt 0) {
-            # Yeni IP'leri txt'ye kaydet
-            $currentNewIPs | Sort-Object -Unique | Set-Content $RESOLVED_FILE
+    foreach ($domain in $domains) {
+        try {
+            $addrs = [System.Net.Dns]::GetHostAddresses($domain)
+        } catch { continue }
+        foreach ($a in $addrs) {
+            $ip = $a.ToString()
+            if ($a.AddressFamily -eq 'InterNetwork') {
+                $desiredV4[$ip] = $true
+            } elseif ($a.AddressFamily -eq 'InterNetworkV6') {
+                [void]$v6set.Add($ip)
+            }
         }
     }
-    
-    # Ýþlemciyi yormamak için 10 saniye uyu (Bu süreyi ihtiyacýna göre kýsaltabilirsin)
-    Start-Sleep -Seconds 10
+
+    # --- IPv4: ekle ---
+    $added = 0
+    foreach ($ip in $desiredV4.Keys) {
+        $miss.Remove($ip) | Out-Null
+        if (-not $routed.ContainsKey($ip)) {
+            $exists = Get-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue
+            if (-not $exists) {
+                New-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
+            }
+            $routed[$ip] = $true
+            $added++
+        }
+    }
+
+    # --- IPv4: kalÄ±cÄ± kaybolanÄ± prune et ---
+    $removed = 0
+    foreach ($ip in @($routed.Keys)) {
+        if (-not $desiredV4.ContainsKey($ip)) {
+            $m = 0; if ($miss.ContainsKey($ip)) { $m = $miss[$ip] }
+            $m++
+            if ($m -ge $PruneAfter) {
+                Get-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue |
+                    Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+                $routed.Remove($ip) | Out-Null
+                $miss.Remove($ip) | Out-Null
+                $removed++
+            } else {
+                $miss[$ip] = $m
+            }
+        }
+    }
+
+    if ($added -or $removed) {
+        $routed.Keys | Sort-Object | Set-Content $ResolvedFile -Encoding UTF8
+        Write-Log "v4: +$added -$removed (toplam $($routed.Count))"
+    }
+
+    # --- IPv6 fail-closed: deÄŸiÅŸtiyse block kuralÄ±nÄ± yeniden kur ---
+    $v6sorted = @($v6set) | Sort-Object
+    $v6key = ($v6sorted -join ",")
+    if ($v6key -ne $lastV6Key) {
+        Remove-NetFirewallRule -Group $V6Rule -ErrorAction SilentlyContinue
+        if ($v6sorted.Count -gt 0) {
+            New-NetFirewallRule -DisplayName $V6Rule -Group $V6Rule -Direction Outbound `
+                -Action Block -RemoteAddress $v6sorted -Profile Any -ErrorAction SilentlyContinue | Out-Null
+        }
+        $lastV6Key = $v6key
+        Write-Log "v6 block: $($v6sorted.Count) adres"
+    }
+
+    Start-Sleep -Seconds $SleepSeconds
 }

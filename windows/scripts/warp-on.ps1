@@ -1,161 +1,174 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Start usque MASQUE tunnel + selective routing
+    usque MASQUE tünelini başlat + routing kur.
+    Mod (transport + scope) desired.json'dan okunur.
+
+    transport: http2 | http3
+    scope:     selective (fiziksel default, sadece blacklist /32 -> TUN)
+               full      (split-default -> TUN, endpoint fiziksel'de pinli)
 #>
-
-param(
-    [ValidateSet("http2","http3")]
-    [string]$Mode = "http2"
-)
-
-Set-StrictMode -Version Latest
+Set-StrictMode -Version 1.0
 $ErrorActionPreference = "Stop"
 
-#--- Paths
-$INSTALL_DIR   = "$env:ProgramFiles\usque"
-$USQUE_EXE     = "$INSTALL_DIR\usque.exe"
-$DNSPROXY_EXE  = "$INSTALL_DIR\dnsproxy.exe"
-$CONFIG_JSON   = "$env:USERPROFILE\config.json"
-$ROUTE_CONF    = "$env:APPDATA\warp-tray\warp-route.conf"
-$BLACKLIST_TXT = "$env:APPDATA\warp-tray\warp-blacklist.txt"
-$LOG_FILE      = "$env:ProgramData\usque\usque.log"
-$TUNNEL_LOG    = "$env:ProgramData\usque\usque-tunnel.log" # YENI DOSYA EKLEND�
-$RUN_DIR       = "$env:ProgramData\usque\run"
-$PID_FILE      = "$RUN_DIR\usque.pid"
-$DNS_PID_FILE  = "$RUN_DIR\dnsproxy.pid"
-$TUN_NAME      = "usque"
-$WARP_TABLE    = 201   
-$MASQUE_IP     = "162.159.198.2"
-$LISTEN_DNS    = "127.0.0.2"
-$UPSTREAM_DNS  = "77.88.8.8:1253"
-$UPSTREAM_DNS2 = "77.88.8.1:1253"
+# --- Yollar (hepsi paylaşılan ProgramData; SYSTEM + kullanıcı ortak) ---
+$InstallDir   = Join-Path $env:ProgramFiles "usque"
+$UsqueExe     = Join-Path $InstallDir "usque.exe"
+$DnsproxyExe  = Join-Path $InstallDir "dnsproxy.exe"
+$DataDir      = Join-Path $env:ProgramData "usque"
+$ConfigDir    = Join-Path $DataDir "config"
+$RunDir       = Join-Path $DataDir "run"
+$LogFile      = Join-Path $DataDir "usque.log"
+$ConfigJson   = Join-Path $ConfigDir "config.json"
+$StateFile    = Join-Path $RunDir "state.json"
+$DesiredFile  = Join-Path $RunDir "desired.json"
+$StdoutLog    = Join-Path $DataDir "usque-stdout.log"
+$StderrLog    = Join-Path $DataDir "usque-stderr.log"
 
-#--- Ensure dirs
-foreach ($d in @($RUN_DIR, (Split-Path $LOG_FILE))) {
+$TunName      = "usque"
+$ListenDns    = "127.0.0.2"
+$UpstreamDns1 = "77.88.8.8:1253"   # Yandex, port 1253 -> TR port-53 interception bypass
+$UpstreamDns2 = "77.88.8.1:1253"
+$FullDns      = "1.1.1.1"          # full modda DNS tünelden geçer
+# Cloudflare MASQUE altyapı bloğu (endpoint UDP/http3'te dinamik bulunamazsa pin)
+$CfBaseline   = "162.159.198.0/24"
+
+foreach ($d in @($RunDir, $ConfigDir, $DataDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
-# ENCODING VE K�L�T ��Z�M�
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    Add-Content -Path $LOG_FILE -Value "$ts  $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
+    Add-Content -Path $LogFile -Value "$ts  $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-function Get-DefaultGateway {
-    $route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
-             Sort-Object RouteMetric | Select-Object -First 1
-    if (-not $route) { throw "No default gateway found" }
-    return $route
+# --- desired oku ---
+$transport = "http2"; $scope = "selective"
+if (Test-Path $DesiredFile) {
+    try {
+        $d = Get-Content $DesiredFile -Raw | ConvertFrom-Json
+        if ($d.transport) { $transport = "$($d.transport)" }
+        if ($d.scope)     { $scope     = "$($d.scope)" }
+    } catch { Write-Log "desired.json okunamadı, varsayılan kullanılıyor: $_" }
 }
+if ($transport -notin @("http2","http3")) { $transport = "http2" }
+if ($scope     -notin @("selective","full")) { $scope = "selective" }
+Write-Log "warp-on: transport=$transport scope=$scope"
 
-function Get-TunInterface {
-    return Get-NetAdapter | Where-Object { $_.Name -eq $TUN_NAME } | Select-Object -First 1
-}
+# --- 1. usque başlat ---
+$usque = Get-Process -Name "usque" -ErrorAction SilentlyContinue
+if (-not $usque) {
+    if (-not (Test-Path $UsqueExe))   { throw "usque.exe yok: $UsqueExe" }
+    if (-not (Test-Path $ConfigJson)) { throw "config.json yok: $ConfigJson — 'usque register' çalıştır" }
 
-#=== 1. Start usque if not running ===========================================
-Write-Log "warp-on: mode=$Mode"
+    $protoFlags = @()
+    if ($transport -eq "http2") { $protoFlags = @("--http2") }
 
-$usqueRunning = Get-Process -Name "usque" -ErrorAction SilentlyContinue
-if (-not $usqueRunning) {
-    if (-not (Test-Path $USQUE_EXE)) {
-        throw "usque.exe not found at $USQUE_EXE"
-    }
-    if (-not (Test-Path $CONFIG_JSON)) {
-        throw "config.json not found at $CONFIG_JSON. Run: usque register"
-    }
-
-    $protoFlags = if ($Mode -eq "http2") { @("--http2") } else { @() }
-
-    Write-Log "Starting usque nativetun ($Mode)..."
-    
-    # T�NEL LOGLARI ���N �K� AYRI DOSYA KULLANIYORUZ
-    $STDOUT_LOG = "$env:ProgramData\usque\usque-stdout.log"
-    $STDERR_LOG = "$env:ProgramData\usque\usque-stderr.log"
-
-    Write-Log "Starting usque nativetun ($Mode)..."
-    
-    $proc = Start-Process -FilePath $USQUE_EXE `
-        -ArgumentList (@("-c", $CONFIG_JSON, "nativetun", "--always-reconnect", "--keepalive-period", "15s") + $protoFlags) `
-        -RedirectStandardOutput $STDOUT_LOG `
-        -RedirectStandardError  $STDERR_LOG `
+    $argList = @("-c", $ConfigJson, "nativetun", "--always-reconnect",
+                 "--keepalive-period", "15s") + $protoFlags
+    Write-Log "usque başlatılıyor: $($argList -join ' ')"
+    $proc = Start-Process -FilePath $UsqueExe -ArgumentList $argList `
+        -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog `
         -NoNewWindow -PassThru
-    $proc.Id | Set-Content $PID_FILE
-
-    $waited = 0
-    while (-not (Get-TunInterface) -and $waited -lt 10) {
-        Start-Sleep -Milliseconds 500
-        $waited++
-    }
-    if (-not (Get-TunInterface)) {
-        throw "TUN adapter '$TUN_NAME' did not appear after 5s."
-    }
-    Write-Log "TUN adapter '$TUN_NAME' is up."
+    $usquePid = $proc.Id
 } else {
-    Write-Log "usque already running (PID $($usqueRunning.Id)), skipping start."
+    $usquePid = $usque.Id
+    Write-Log "usque zaten çalışıyor (PID $usquePid)."
 }
 
-#=== 2. Routing setup ========================================================
-$defaultRoute = Get-DefaultGateway
-$gwIP         = $defaultRoute.NextHop
-$physIface    = (Get-NetAdapter -InterfaceIndex $defaultRoute.InterfaceIndex).Name
-$tunIface     = (Get-TunInterface).Name
+# TUN adapteri görünene dek bekle (koşul-bazlı)
+$waited = 0
+while (-not (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue) -and $waited -lt 24) {
+    Start-Sleep -Milliseconds 500
+    $waited++
+}
+if (-not (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
+    throw "TUN adapteri '$TunName' 12sn içinde gelmedi. usque-stderr.log'a bak."
+}
+Write-Log "TUN '$TunName' ayakta."
 
-Write-Log "Gateway: $gwIP via $physIface | TUN: $tunIface"
+# --- 2. Default gateway / fiziksel arayüz ---
+$defRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+            Where-Object { $_.NextHop -ne "0.0.0.0" } |
+            Sort-Object RouteMetric | Select-Object -First 1
+if (-not $defRoute) { throw "Default gateway bulunamadı." }
+$gwIP      = $defRoute.NextHop
+$physIface = (Get-NetAdapter -InterfaceIndex $defRoute.InterfaceIndex).Name
+Write-Log "Gateway: $gwIP via $physIface"
 
-$masqueExists = Get-NetRoute -DestinationPrefix "$MASQUE_IP/32" -ErrorAction SilentlyContinue
-if ($masqueExists) { Remove-NetRoute -DestinationPrefix "$MASQUE_IP/32" -Confirm:$false -ErrorAction SilentlyContinue }
-New-NetRoute -DestinationPrefix "$MASQUE_IP/32" -InterfaceAlias $physIface -NextHop $gwIP -RouteMetric 1 | Out-Null
-Write-Log "Pinned MASQUE endpoint $MASQUE_IP -> $physIface"
+# --- 3. Endpoint pin (loop önler) ---
+$pins = New-Object System.Collections.Generic.List[string]
+function Add-Pin([string]$prefix) {
+    if ([string]::IsNullOrWhiteSpace($prefix)) { return }
+    Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue |
+        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+    New-NetRoute -DestinationPrefix $prefix -InterfaceAlias $physIface -NextHop $gwIP `
+        -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
+    $pins.Add($prefix)
+    Write-Log "Endpoint pin: $prefix -> $physIface"
+}
 
-Set-NetIPInterface -InterfaceAlias $tunIface -InterfaceMetric 5000 -ErrorAction SilentlyContinue
+# http2 (TCP) ise gerçek endpoint'i bul; bulunamazsa (http3/UDP) baseline blok pin'le
+$endpoint = $null
+try {
+    $endpoint = (Get-NetTCPConnection -OwningProcess $usquePid -RemotePort 443 `
+                 -State Established -ErrorAction SilentlyContinue |
+                 Select-Object -First 1).RemoteAddress
+} catch {}
+if ($endpoint) { Add-Pin "$endpoint/32" }
+if ($scope -eq "full" -or -not $endpoint) { Add-Pin $CfBaseline }
 
-#=== 3. Interface routing ====================================================
-$ifaceCount = 0
-if (Test-Path $ROUTE_CONF) {
-    $lines = Get-Content $ROUTE_CONF
-    foreach ($rawLine in $lines) {
-        $line = ($rawLine -replace '#.*', '').Trim()
-        if ($line -match '^iface\s+(\S+)') {
-            $iface = $Matches[1]
-            $exists = Get-NetAdapter -Name $iface -ErrorAction SilentlyContinue
-            if ($exists) {
-                Get-NetRoute -InterfaceAlias $iface -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
-                    Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-                New-NetRoute -DestinationPrefix "0.0.0.0/0" -InterfaceAlias $tunIface -RouteMetric 10 | Out-Null
-                Write-Log "Interface $iface -> routed via TUN"
-                $ifaceCount++
-            } else {
-                Write-Log "WARNING: Interface '$iface' not found, skipping."
-            }
-        }
+# --- 4. Scope'a göre routing ---
+if ($scope -eq "full") {
+    # split-default: fiziksel default'u SİLMEDEN geçersiz kıl (teardown temiz)
+    foreach ($half in @("0.0.0.0/1","128.0.0.0/1")) {
+        Get-NetRoute -DestinationPrefix $half -InterfaceAlias $TunName -ErrorAction SilentlyContinue |
+            Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetRoute -DestinationPrefix $half -InterfaceAlias $TunName -RouteMetric 1 `
+            -ErrorAction SilentlyContinue | Out-Null
     }
+    Set-DnsClientServerAddress -InterfaceAlias $physIface -ServerAddresses @($FullDns) -ErrorAction SilentlyContinue
+    Write-Log "FULL: split-default -> $TunName, DNS=$FullDns"
 }
+else {
+    # selective: fiziksel default kalır; TUN yüksek metric
+    Set-NetIPInterface -InterfaceAlias $TunName -InterfaceMetric 5000 -ErrorAction SilentlyContinue
 
-#=== 4. Domain blacklist -> DNS -> route IPs through TUN =====================
-$dnsRunning = Get-Process -Name "dnsproxy" -ErrorAction SilentlyContinue
-if ($dnsRunning) {
+    # dnsproxy: önce başlat + DİNLEDİĞİNİ doğrula, ANCAK ondan sonra sistem DNS'ini değiştir
     Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
-}
-
-if (Test-Path $BLACKLIST_TXT) {
-    if (-not (Test-Path $DNSPROXY_EXE)) {
-        Write-Log "WARNING: dnsproxy.exe not found! Blacklist DNS intercept will be skipped."
+    if (Test-Path $DnsproxyExe) {
+        $dnsArgs = @("-l", $ListenDns, "-p", "53", "-u", $UpstreamDns1, "-u", $UpstreamDns2, "--cache")
+        $dnsProc = Start-Process -FilePath $DnsproxyExe -ArgumentList $dnsArgs -NoNewWindow -PassThru
+        $ok = $false; $tries = 0
+        while (-not $ok -and $tries -lt 10) {
+            Start-Sleep -Milliseconds 300
+            $alive = Get-Process -Id $dnsProc.Id -ErrorAction SilentlyContinue
+            $listen = Get-NetUDPEndpoint -LocalAddress $ListenDns -LocalPort 53 -ErrorAction SilentlyContinue
+            if ($alive -and $listen) { $ok = $true }
+            $tries++
+        }
+        if ($ok) {
+            Set-DnsClientServerAddress -InterfaceAlias $physIface -ServerAddresses @($ListenDns) -ErrorAction SilentlyContinue
+            Write-Log "SELECTIVE: dnsproxy $ListenDns:53 ayakta, sistem DNS -> $ListenDns"
+        } else {
+            Write-Log "UYARI: dnsproxy dinlemedi — DNS'e DOKUNULMADI (internet korunur). Blacklist devre dışı."
+        }
     } else {
-        Write-Log "Starting dnsproxy on $LISTEN_DNS..."
-        $dnsArgs = @("-l", $LISTEN_DNS, "-p", "53", "-u", $UPSTREAM_DNS, "-u", $UPSTREAM_DNS2, "--cache")
-        $dnsProc = Start-Process -FilePath $DNSPROXY_EXE -ArgumentList $dnsArgs -NoNewWindow -PassThru
-        $dnsProc.Id | Set-Content $DNS_PID_FILE
-
-        Set-DnsClientServerAddress -InterfaceAlias $physIface -ServerAddresses @($LISTEN_DNS, "1.1.1.1")
-        Write-Log "DNS -> $LISTEN_DNS (dnsproxy, upstream: $UPSTREAM_DNS)"
+        Write-Log "UYARI: dnsproxy.exe yok — blacklist DNS atlandı."
     }
-} else {
-    Write-Log "No blacklist found at $BLACKLIST_TXT, skipping DNS setup."
+
+    # route-sync watchdog (blacklist /32 + IPv6 fail-closed)
+    Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
 }
 
-#=== 5. Start RouteSync Watchdog =============================================
-Write-Log "Starting RouteSync Watchdog task..."
-Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
-
-Write-Log "warp-on OK | mode=$Mode | gw=$gwIP | phys=$physIface | tun=$tunIface | ifaces=$ifaceCount"
+# --- 5. state.json yaz (tek doğru kaynak) ---
+$state = [ordered]@{
+    transport = $transport
+    scope     = $scope
+    pid       = $usquePid
+    endpoint  = $endpoint
+    pins      = @($pins)
+    started   = (Get-Date).ToString("o")
+}
+$state | ConvertTo-Json -Compress | Set-Content -Path $StateFile -Encoding UTF8
+Write-Log "warp-on OK | $transport/$scope | pid=$usquePid | pins=$($pins -join ',')"

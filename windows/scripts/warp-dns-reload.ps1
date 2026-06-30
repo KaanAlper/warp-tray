@@ -1,40 +1,45 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Reload blacklist DNS routing. Windows equivalent of warp-dns-reload.
-    Flushes DNS cache, re-resolves all blacklisted domains, updates routes.
+    Blacklist DNS/route'larını taze yenile: DNS cache flush, mevcut /32
+    blacklist route'larını temizle, route-sync'i yeniden başlat (sıfırdan çözer).
 #>
+Set-StrictMode -Version 1.0
+$ErrorActionPreference = "SilentlyContinue"
 
-$TUN_NAME = "usque"
-$LOG_FILE = "$env:ProgramData\usque\usque.log"
+$DataDir      = Join-Path $env:ProgramData "usque"
+$RunDir       = Join-Path $DataDir "run"
+$LogFile      = Join-Path $DataDir "usque.log"
+$ResolvedFile = Join-Path $RunDir "warp-resolved-ips.txt"
+$TunName      = "usque"
+$V6Rule       = "WarpTray-IPv6-FailClosed"
 
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    Add-Content -Path $LOG_FILE -Value "$ts  $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
+    Add-Content -Path $LogFile -Value "$ts  [dns-reload] $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-$tunAdapter = Get-NetAdapter -Name $TUN_NAME -ErrorAction SilentlyContinue
-if (-not $tunAdapter) {
-    Write-Warning "WARP kapali, DNS yenileme atlandi."
+$tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
+if (-not $tun) {
+    Write-Log "WARP kapalı — atlandı."
     exit 0
 }
 
-Write-Log "warp-dns-reload: flushing DNS cache..."
-Clear-DnsClientCache
+Write-Log "DNS cache flush..."
+Clear-DnsClientCache -ErrorAction SilentlyContinue
 
-# Remove all existing blacklist-derived routes via TUN
-$RESOLVED_FILE = "$env:ProgramData\usque\run\warp-resolved-ips.txt"
-if (Test-Path $RESOLVED_FILE) {
-    Get-Content $RESOLVED_FILE | ForEach-Object {
-        $ip = $_.Trim()
-        if ($ip) {
-            Remove-NetRoute -DestinationPrefix "$ip/32" -Confirm:$false -ErrorAction SilentlyContinue
-        }
-    }
-    Remove-Item $RESOLVED_FILE -Force -ErrorAction SilentlyContinue
-}
+# route-sync'i durdur, /32 blacklist route'larını + v6 kuralını + defteri temizle
+Stop-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
 
-Write-Log "warp-dns-reload: re-resolving domains..."
-& "$PSScriptRoot\warp-route-sync.ps1"
-Write-Log "warp-dns-reload: done."
-Write-Host "DNS reloaded."
+# Sadece /32 host route'larını kaldır (split-default /1'lere dokunma)
+Get-NetRoute -InterfaceIndex $tun.InterfaceIndex -ErrorAction SilentlyContinue |
+    Where-Object { $_.DestinationPrefix -like "*/32" } |
+    Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+
+Remove-NetFirewallRule -Group $V6Rule -ErrorAction SilentlyContinue
+Remove-Item $ResolvedFile -Force -ErrorAction SilentlyContinue
+
+# Taze yeniden başlat
+Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+Write-Log "tamam — route-sync yeniden başlatıldı."
