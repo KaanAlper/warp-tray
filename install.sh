@@ -39,7 +39,15 @@ fi
 #=== Dependencies ==============================================================
 say "Installing system packages…"
 pacman -S --needed --noconfirm \
-    python-pyside6 libnotify sudo iproute2 systemd dnsmasq nftables >/dev/null
+    libnotify sudo iproute2 systemd dnsmasq nftables >/dev/null \
+    || warn "Bazı paketler kurulamadı (devam ediliyor)."
+# PySide6: paket adı dağıtıma göre değişir (pyside6 / python-pyside6) ve zaten
+# kuruluysa atla — biri eksik diye tüm kurulumu aborte etme.
+if ! sudo -u "$TARGET_USER" python -c 'import PySide6' 2>/dev/null; then
+    pacman -S --needed --noconfirm pyside6 >/dev/null 2>&1 \
+      || pacman -S --needed --noconfirm python-pyside6 >/dev/null 2>&1 \
+      || warn "PySide6 kurulamadı — elle: 'pacman -S pyside6' ya da 'pip install --user PySide6'."
+fi
 
 if ! command -v usque >/dev/null 2>&1; then
     if [ "$HAVE_YAY" -eq 1 ]; then
