@@ -21,6 +21,12 @@ $TunName       = "usque"
 $V6Rule        = "WarpTray-IPv6-FailClosed"
 $PruneAfter    = 3      # bir IP bu kadar döngü görünmezse route'u kaldır
 $SleepSeconds  = 15
+# dnsproxy watchdog (selective modda sistem DNS 127.0.0.2'ye bağlı; dnsproxy
+# ölürse internet gider — ölmüşse yeniden başlat)
+$DnsproxyExe   = Join-Path (Join-Path $env:ProgramFiles "usque") "dnsproxy.exe"
+$ListenDns     = "127.0.0.2"
+$UpstreamDns1  = "77.88.8.8:1253"
+$UpstreamDns2  = "77.88.8.1:1253"
 
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -43,6 +49,14 @@ while ($true) {
     if (-not (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
         Write-Log "TUN yok — çıkılıyor."
         break
+    }
+
+    # dnsproxy watchdog: düşmüşse yeniden başlat (DNS ölü kalıp internet gitmesin)
+    if ((Test-Path $DnsproxyExe) -and -not (Get-Process -Name dnsproxy -ErrorAction SilentlyContinue)) {
+        Start-Process -FilePath $DnsproxyExe -ArgumentList @(
+            "-l", $ListenDns, "-p", "53", "-u", $UpstreamDns1, "-u", $UpstreamDns2, "--cache"
+        ) -NoNewWindow -ErrorAction SilentlyContinue
+        Write-Log "dnsproxy düşmüştü, yeniden başlatıldı (watchdog)"
     }
 
     $domains = @()
