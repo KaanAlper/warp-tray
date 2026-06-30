@@ -1,10 +1,10 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Selective mod watchdog'u. WARP açık olduğu sürece blacklist domainlerini
+    Selective mod watchdog'u. Asena açık olduğu sürece blacklist domainlerini
     sürekli çözer:
       IPv4 -> /32 route TUN'a (yeni ekle, kalıcı kaybolanı prune et)
-      IPv6 -> outbound firewall block (fail-closed: uygulama IPv4'e düşer -> WARP)
+      IPv6 -> outbound firewall block (fail-closed: uygulama IPv4'e düşer -> Asena)
 
     Daemon: in-memory durum döngüler arası korunur (round-robin flap önleme).
 #>
@@ -15,10 +15,10 @@ $DataDir       = Join-Path $env:ProgramData "usque"
 $ConfigDir     = Join-Path $DataDir "config"
 $RunDir        = Join-Path $DataDir "run"
 $LogFile       = Join-Path $DataDir "usque.log"
-$BlacklistTxt  = Join-Path $ConfigDir "warp-blacklist.txt"
-$ResolvedFile  = Join-Path $RunDir "warp-resolved-ips.txt"
+$BlacklistTxt  = Join-Path $ConfigDir "asena-blacklist.txt"
+$ResolvedFile  = Join-Path $RunDir "asena-resolved-ips.txt"
 $TunName       = "usque"
-$V6Rule        = "WarpTray-IPv6-FailClosed"
+$V6Rule        = "AsenaPlug-IPv6-FailClosed"
 # CDN'ler (AWS/Cloudflare) her sorguda farklı IP döndürür. Agresif prune edersek
 # tarayıcının kullandığı IP düşüp kaynak yarım gelir. Yüksek tut -> IP'ler oturum
 # boyunca BİRİKİR, CDN havuzu zamanla tam kapsanır, set sabitlenir (churn durur).
@@ -41,7 +41,7 @@ function Write-Log($msg) {
 
 # Önbellekten son IP'leri yükle ve route'larını HEMEN ekle. İki sebep:
 #  1) Reconnect'te blacklist ANINDA çalışsın (resolve loop'unu beklemeden).
-#  2) Bug fix: route'lar warp-off'ta uçar; eskiden $routed'ı diskten yükleyip
+#  2) Bug fix: route'lar asena-off'ta uçar; eskiden $routed'ı diskten yükleyip
 #     "zaten var" diye atlıyorduk -> reconnect'te route'lar HİÇ eklenmiyordu.
 $routed = @{}
 $tunIdxInit = (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue).ifIndex
@@ -78,7 +78,7 @@ while ($true) {
         Write-Log "dnsproxy düşmüştü, yeniden başlatıldı (watchdog)"
     }
 
-    # resolver IP'leri her zaman WARP tünelinden geçsin (zehirsiz DNS garantisi)
+    # resolver IP'leri her zaman Asena tünelinden geçsin (zehirsiz DNS garantisi)
     foreach ($r in $Resolvers) {
         if (-not (Get-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue)) {
             New-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null

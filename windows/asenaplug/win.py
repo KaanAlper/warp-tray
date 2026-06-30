@@ -46,7 +46,7 @@ def relaunch_as_admin():
 
 
 # --- Privilege'li script çalıştırma ---
-# Tray zaten elevated (logon görevi Highest ile başlatır) → warp-*.ps1 doğrudan
+# Tray zaten elevated (logon görevi Highest ile başlatır) → asena-*.ps1 doğrudan
 # admin olarak çalışır. Ayrı SYSTEM tetik görevine gerek yok.
 def run_script(name: str, args: list[str] | None = None,
                wait: bool = False, timeout: int | None = None):

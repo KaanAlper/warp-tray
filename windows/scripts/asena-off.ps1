@@ -1,7 +1,7 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    usque tünelini durdur + tüm WARP routing'i geri al.
+    usque tünelini durdur + tüm Asena routing'i geri al.
     Adımlar birbirinden bağımsız hata-toleranslı; DNS reset ASLA atlanmaz.
 #>
 Set-StrictMode -Version 1.0
@@ -12,7 +12,7 @@ $RunDir    = Join-Path $DataDir "run"
 $LogFile   = Join-Path $DataDir "usque.log"
 $StateFile = Join-Path $RunDir "state.json"
 $TunName   = "usque"
-$V6Rule    = "WarpTray-IPv6-FailClosed"
+$V6Rule    = "AsenaPlug-IPv6-FailClosed"
 $ListenDns = "127.0.0.2"
 
 function Write-Log($msg) {
@@ -20,7 +20,7 @@ function Write-Log($msg) {
     Add-Content -Path $LogFile -Value "$ts  $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-Write-Log "warp-off: teardown başlıyor..."
+Write-Log "asena-off: teardown başlıyor..."
 
 # state.json (pin/pid bilgisi)
 $state = $null
@@ -29,7 +29,7 @@ if (Test-Path $StateFile) {
 }
 
 # 1. route-sync watchdog'u durdur
-Stop-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName "AsenaPlug_RouteSync" -ErrorAction SilentlyContinue
 
 # 2. dnsproxy durdur
 Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
@@ -58,8 +58,9 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     }
 }
 
-# 6. IPv6 fail-closed firewall kuralını kaldır
+# 6. IPv6 firewall kurallarını kaldır (selective fail-closed + full leak-block)
 Remove-NetFirewallRule -Group $V6Rule -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -Group "AsenaPlug-Full-IPv6Block" -ErrorAction SilentlyContinue
 
 # 7. Endpoint pin route'ları FİZİKSEL arayüzde -> usque ölünce uçmaz, explicit sil
 if ($state -and $state.pins) {
@@ -85,4 +86,4 @@ if (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue) {
     Write-Log "UYARI: TUN '$TunName' hâlâ duruyor. Sorun sürerse yeniden başlat."
 }
 
-Write-Log "warp-off: tamam."
+Write-Log "asena-off: tamam."

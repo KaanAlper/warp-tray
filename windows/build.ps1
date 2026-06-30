@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    warp-tray.exe üret (PyInstaller, tek dosya, konsolsuz).
+    asena.exe üret (PyInstaller, tek dosya, konsolsuz).
 
 .DESCRIPTION
     Uygun bir CPython yorumlayıcısı otomatik seçilir (PyPy reddedilir — PySide6/
@@ -15,7 +15,7 @@
     requirements.txt kurulumunu atla (zaten kuruluysa).
 
 .NOTES
-    Çıktı: dist\warp-tray.exe
+    Çıktı: dist\asena.exe
 #>
 param(
     [string]$Python = "",
@@ -78,12 +78,12 @@ try {
         --add-data "bundled;bundled" `
         --add-data "scripts;scripts" `
         --add-data "assets;assets" `
-        --hidden-import warp_tray `
-        --hidden-import warp_tray.paths `
-        --hidden-import warp_tray.win `
-        --hidden-import warp_tray.state `
-        --hidden-import warp_tray.install `
-        --hidden-import warp_tray.tray `
+        --hidden-import asenaplug `
+        --hidden-import asenaplug.paths `
+        --hidden-import asenaplug.win `
+        --hidden-import asenaplug.state `
+        --hidden-import asenaplug.install `
+        --hidden-import asenaplug.tray `
         --hidden-import winotify `
         "AsenaPlug.pyw"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller başarısız (exit $LASTEXITCODE)" }

@@ -1,4 +1,4 @@
-"""warp-tray Windows portu — modüler paket.
+"""asena Windows portu — modüler paket.
 
 Sorumluluk ayrımı:
   paths   — tüm yol sabitleri + Task Scheduler görev adları (tek kaynak)

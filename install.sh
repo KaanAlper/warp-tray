@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Cloudflare WARP via MASQUE (usque) — selective routing tray for Hyprland.
+# Cloudflare MASQUE (usque) — selective routing tray for Hyprland.
 #
-# Physical internet is the default. Only apps listed in warp-route.conf and
-# domains in warp-blacklist.txt are routed through WARP.
+# Physical internet is the default. Only apps listed in asena-route.conf and
+# domains in asena-blacklist.txt are routed through Asena.
 #
 # Tested on: CachyOS / Arch Linux + Hyprland (illogical-impulse / end-4 dots).
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/kaanalper/warp-tray-setup/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/KaanAlper/AsenaPlug/main/install.sh | bash
 # or, after cloning:
 #   ./install.sh
 set -euo pipefail
@@ -52,12 +52,12 @@ if ! command -v usque >/dev/null 2>&1; then
     fi
 fi
 
-#=== /usr/local/bin/warp-on ===================================================
-say "Writing /usr/local/bin/warp-on…"
-cat > /usr/local/bin/warp-on << 'EOF'
+#=== /usr/local/bin/asena-on ===================================================
+say "Writing /usr/local/bin/asena-on…"
+cat > /usr/local/bin/asena-on << 'EOF'
 #!/usr/bin/env bash
-# WARP nativetun start — physical is default, only listed apps/ifaces/domains go through WARP.
-# Usage: warp-on [http2|http3]   (default: http2)
+# Asena nativetun start — physical is default, only listed apps/ifaces/domains go through Asena.
+# Usage: asena-on [http2|http3]   (default: http2)
 # Runs as root via sudoers NOPASSWD.
 set -e
 
@@ -65,14 +65,14 @@ MODE="${1:-http2}"
 case "$MODE" in
     http2) PROTO_FLAGS="--http2" ;;
     http3) PROTO_FLAGS="" ;;
-    *) echo "Usage: warp-on [http2|http3]" >&2; exit 2 ;;
+    *) echo "Usage: asena-on [http2|http3]" >&2; exit 2 ;;
 esac
 
 MASQUE_IP="162.159.198.2"
-WARP_TABLE=201
-WARP_MARK=0x43
-SLICE_NAME="warp-only.slice"
-RUN_DIR="/run/warp"
+ASENA_TABLE=201
+ASENA_MARK=0x43
+SLICE_NAME="asena-only.slice"
+RUN_DIR="/run/asena"
 
 # Hedef kullaniciyi runtime'da belirle (hardcode yok):
 #   sudo ile cagrildiysa SUDO_USER, degilse ilk normal kullanici (uid 1000).
@@ -85,7 +85,7 @@ USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
 
 USQUE_DIR="$USER_HOME"
 USQUE_CONFIG="${USQUE_DIR}/config.json"
-ROUTE_CONF="$USER_HOME/.config/warp-route.conf"
+ROUTE_CONF="$USER_HOME/.config/asena-route.conf"
 
 GW=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $3; exit}')
 DEV=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $5; exit}')
@@ -112,12 +112,12 @@ fi
 ip route replace "${MASQUE_IP}/32" via "$GW" dev "$DEV"
 
 # Physical default route korunuyor — tun0 default yapilmiyor.
-ip route flush table "$WARP_TABLE" 2>/dev/null || true
-ip route add default dev tun0 table "$WARP_TABLE"
-ip rule del fwmark "$WARP_MARK" 2>/dev/null || true
-ip rule add fwmark "$WARP_MARK" table "$WARP_TABLE" priority 100
+ip route flush table "$ASENA_TABLE" 2>/dev/null || true
+ip route add default dev tun0 table "$ASENA_TABLE"
+ip rule del fwmark "$ASENA_MARK" 2>/dev/null || true
+ip rule add fwmark "$ASENA_MARK" table "$ASENA_TABLE" priority 100
 
-# rp_filter: asimetrik routing icin gevsetilir. Mevcut deger saklanir, warp-off geri yukler.
+# rp_filter: asimetrik routing icin gevsetilir. Mevcut deger saklanir, asena-off geri yukler.
 mkdir -p "$RUN_DIR" 2>/dev/null || true
 sysctl -n net.ipv4.conf.all.rp_filter > "$RUN_DIR/rpfilter.all" 2>/dev/null || true
 sysctl -n "net.ipv4.conf.${DEV}.rp_filter" > "$RUN_DIR/rpfilter.dev" 2>/dev/null || true
@@ -125,7 +125,7 @@ printf '%s\n' "$DEV" > "$RUN_DIR/rpfilter.devname" 2>/dev/null || true
 sysctl -wq net.ipv4.conf.all.rp_filter=2
 sysctl -wq "net.ipv4.conf.${DEV}.rp_filter=2" 2>/dev/null || true
 
-# warp-only.slice icin cgroup path'i al.
+# asena-only.slice icin cgroup path'i al.
 runuser -u "$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
     systemctl --user start "$SLICE_NAME" 2>/dev/null || true
 SLICE_PATH=$(runuser -u "$USER_NAME" -- env XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
@@ -141,44 +141,44 @@ else
 fi
 
 # nft tablosu ve zincirler.
-nft delete table inet warp_route 2>/dev/null || true
-nft delete table ip warp_nat 2>/dev/null || true
-nft add table inet warp_route
-nft -- add chain inet warp_route prerouting  '{ type filter hook prerouting priority -150 ; }'
-nft -- add chain inet warp_route postrouting '{ type filter hook postrouting priority -150 ; }'
+nft delete table inet asena_route 2>/dev/null || true
+nft delete table ip asena_nat 2>/dev/null || true
+nft add table inet asena_route
+nft -- add chain inet asena_route prerouting  '{ type filter hook prerouting priority -150 ; }'
+nft -- add chain inet asena_route postrouting '{ type filter hook postrouting priority -150 ; }'
 # TCP MSS clamp: tun0 MTU=1280 vs LAN MTU=1500 uyusmazligini onler (TLS handshake drop).
-nft add rule inet warp_route postrouting oifname tun0 tcp flags syn tcp option maxseg size set 1220
+nft add rule inet asena_route postrouting oifname tun0 tcp flags syn tcp option maxseg size set 1220
 # IPv4 mark/route zinciri.
-nft -- add chain inet warp_route output  '{ type route  hook output priority -150 ; }'
+nft -- add chain inet asena_route output  '{ type route  hook output priority -150 ; }'
 # IPv6 fail-closed zinciri (ayri filter chain, reject icin).
-nft -- add chain inet warp_route output6 '{ type filter hook output priority -150 ; }'
+nft -- add chain inet asena_route output6 '{ type filter hook output priority -150 ; }'
 
 # Domain tabanli IP set'leri — dnsmasq DNS sorgularinda doldurur. Timeout 1h.
-nft add set inet warp_route warp_hosts \
+nft add set inet asena_route asena_hosts \
     '{ type ipv4_addr ; flags interval,timeout ; timeout 3600s ; }'
-nft add set inet warp_route warp_hosts6 \
+nft add set inet asena_route asena_hosts6 \
     '{ type ipv6_addr ; flags interval,timeout ; timeout 3600s ; }'
 
 # --- IPv4: conntrack mark save/restore + marking (output, type route) ---
 # 1) Established baglanti: bizim connmark'imiz varsa packet mark'a geri yukle.
-#    Boylece set TTL'i dolsa bile aktif baglanti WARP'ta kalir (kopmaz/leak olmaz).
-nft add rule inet warp_route output ct mark "$WARP_MARK" meta mark set "$WARP_MARK"
+#    Boylece set TTL'i dolsa bile aktif baglanti Asena'ta kalir (kopmaz/leak olmaz).
+nft add rule inet asena_route output ct mark "$ASENA_MARK" meta mark set "$ASENA_MARK"
 # 2) Blacklist domainleri ve cgroup app'larini damgala.
-nft add rule inet warp_route output ip daddr @warp_hosts counter meta mark set "$WARP_MARK"
+nft add rule inet asena_route output ip daddr @asena_hosts counter meta mark set "$ASENA_MARK"
 if [ -n "$SLICE_REL_PATH" ]; then
-    nft "add rule inet warp_route output socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter meta mark set $WARP_MARK"
+    nft "add rule inet asena_route output socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter meta mark set $ASENA_MARK"
 fi
 # 3) Bizim mark'imizi connmark'a kaydet (sonraki paketler restore edebilsin).
-nft add rule inet warp_route output meta mark "$WARP_MARK" ct mark set "$WARP_MARK"
+nft add rule inet asena_route output meta mark "$ASENA_MARK" ct mark set "$ASENA_MARK"
 
-# --- IPv6 fail-closed: WARP'lik v6 trafigini reddet -> app v4'e duser -> WARP ---
+# --- IPv6 fail-closed: Asena'lik v6 trafigini reddet -> app v4'e duser -> Asena ---
 # (tun0 v6 tasimadigi icin v6'yi tunele sokmak yerine kapatip v4'e zorluyoruz.)
-nft add rule inet warp_route output6 meta nfproto ipv6 ip6 daddr @warp_hosts6 counter reject with icmpv6 type admin-prohibited
+nft add rule inet asena_route output6 meta nfproto ipv6 ip6 daddr @asena_hosts6 counter reject with icmpv6 type admin-prohibited
 if [ -n "$SLICE_REL_PATH" ]; then
-    nft "add rule inet warp_route output6 meta nfproto ipv6 socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter reject with icmpv6 type admin-prohibited"
+    nft "add rule inet asena_route output6 meta nfproto ipv6 socket cgroupv2 level $SLICE_LEVEL \"$SLICE_REL_PATH\" counter reject with icmpv6 type admin-prohibited"
 fi
 
-# PREROUTING: conf'taki iface'ler WARP'a gider.
+# PREROUTING: conf'taki iface'ler Asena'a gider.
 IFACE_COUNT=0
 if [ -f "$ROUTE_CONF" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -186,57 +186,57 @@ if [ -f "$ROUTE_CONF" ]; then
         [ -z "${line// /}" ] && continue
         if [[ "$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
             iface="${BASH_REMATCH[1]}"
-            nft add rule inet warp_route prerouting iifname "$iface" counter meta mark set "$WARP_MARK"
+            nft add rule inet asena_route prerouting iifname "$iface" counter meta mark set "$ASENA_MARK"
             IFACE_COUNT=$((IFACE_COUNT + 1))
         fi
     done < "$ROUTE_CONF"
 fi
 
 # dnsmasq: config uret ve baslat.
-pkill -f "dnsmasq.*warp" 2>/dev/null || true
-/usr/local/bin/warp-dnsmasq-gen
-dnsmasq -C /etc/dnsmasq-warp.conf --pid-file=/run/dnsmasq-warp.pid
+pkill -f "dnsmasq.*asena" 2>/dev/null || true
+/usr/local/bin/asena-dnsmasq-gen
+dnsmasq -C /etc/dnsmasq-asena.conf --pid-file=/run/dnsmasq-asena.pid
 
 # Resolved'i dnsmasq'a yonlendir.
 resolvectl dns "$DEV" 127.0.0.2
 resolvectl domain "$DEV" "~."
 resolvectl default-route "$DEV" true
 
-echo "WARP on ($MODE) gw=$GW dev=$DEV user=$USER_NAME warp_iface=$IFACE_COUNT slice=${SLICE_REL_PATH:-?}"
+echo "Asena on ($MODE) gw=$GW dev=$DEV user=$USER_NAME asena_iface=$IFACE_COUNT slice=${SLICE_REL_PATH:-?}"
 EOF
-chmod 755 /usr/local/bin/warp-on
+chmod 755 /usr/local/bin/asena-on
 
-#=== /usr/local/bin/warp-off ==================================================
-say "Writing /usr/local/bin/warp-off…"
-cat > /usr/local/bin/warp-off << 'EOF'
+#=== /usr/local/bin/asena-off ==================================================
+say "Writing /usr/local/bin/asena-off…"
+cat > /usr/local/bin/asena-off << 'EOF'
 #!/usr/bin/env bash
-# WARP nativetun stop + routing + dnsmasq teardown.
+# Asena nativetun stop + routing + dnsmasq teardown.
 # Designed to run as root via sudoers NOPASSWD.
 
 MASQUE_IP="162.159.198.2"
-WARP_TABLE=201
-WARP_MARK=0x43
-RUN_DIR="/run/warp"
+ASENA_TABLE=201
+ASENA_MARK=0x43
+RUN_DIR="/run/asena"
 
 PHYS_DEV=$(ip -4 route show default proto dhcp 2>/dev/null | awk '{print $5; exit}')
 [ -z "$PHYS_DEV" ] && PHYS_DEV=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
 
 # dnsmasq'i durdur.
-PID_FILE="/run/dnsmasq-warp.pid"
+PID_FILE="/run/dnsmasq-asena.pid"
 if [ -f "$PID_FILE" ]; then
     kill "$(cat "$PID_FILE")" 2>/dev/null || true
     rm -f "$PID_FILE"
 fi
-pkill -f "dnsmasq.*dnsmasq-warp" 2>/dev/null || true
+pkill -f "dnsmasq.*dnsmasq-asena" 2>/dev/null || true
 
 ip route del "${MASQUE_IP}/32" 2>/dev/null || true
-ip rule del fwmark "$WARP_MARK" 2>/dev/null || true
-ip route flush table "$WARP_TABLE" 2>/dev/null || true
+ip rule del fwmark "$ASENA_MARK" 2>/dev/null || true
+ip route flush table "$ASENA_TABLE" 2>/dev/null || true
 
-nft delete table inet warp_route 2>/dev/null || true
-nft delete table ip warp_nat 2>/dev/null || true
+nft delete table inet asena_route 2>/dev/null || true
+nft delete table ip asena_nat 2>/dev/null || true
 
-# rp_filter: warp-on'un sakladigi degerleri geri yukle.
+# rp_filter: asena-on'un sakladigi degerleri geri yukle.
 if [ -f "$RUN_DIR/rpfilter.all" ]; then
     sysctl -wq "net.ipv4.conf.all.rp_filter=$(cat "$RUN_DIR/rpfilter.all")" 2>/dev/null || true
 fi
@@ -253,29 +253,29 @@ sleep 1
 pkill -9 -x usque 2>/dev/null || true
 ip link del tun0 2>/dev/null || true
 
-echo "WARP off"
+echo "Asena off"
 EOF
-chmod 755 /usr/local/bin/warp-off
+chmod 755 /usr/local/bin/asena-off
 
-#=== /usr/local/bin/warp-bypass-reload ========================================
-say "Writing /usr/local/bin/warp-bypass-reload…"
-cat > /usr/local/bin/warp-bypass-reload << 'EOF'
+#=== /usr/local/bin/asena-bypass-reload ========================================
+say "Writing /usr/local/bin/asena-bypass-reload…"
+cat > /usr/local/bin/asena-bypass-reload << 'EOF'
 #!/usr/bin/env bash
-# Conf degisikligi sonrasi iface WARP kurallarini WARP'i kesmeden uygular.
+# Conf degisikligi sonrasi iface Asena kurallarini Asena'i kesmeden uygular.
 # Designed to run as root via sudoers NOPASSWD.
 set -e
 
-WARP_MARK=0x43
+ASENA_MARK=0x43
 
 # Hedef kullaniciyi runtime'da belirle (hardcode yok).
 USER_NAME="${SUDO_USER:-}"
 { [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; } && USER_NAME=$(id -nu 1000 2>/dev/null)
 USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
-ROUTE_CONF="$USER_HOME/.config/warp-route.conf"
+ROUTE_CONF="$USER_HOME/.config/asena-route.conf"
 
-nft list table inet warp_route >/dev/null 2>&1 || { echo "warp-route-reload: WARP not active, skip"; exit 0; }
+nft list table inet asena_route >/dev/null 2>&1 || { echo "asena-route-reload: Asena not active, skip"; exit 0; }
 
-nft flush chain inet warp_route prerouting
+nft flush chain inet asena_route prerouting
 
 IFACE_COUNT=0
 if [ -f "$ROUTE_CONF" ]; then
@@ -284,22 +284,22 @@ if [ -f "$ROUTE_CONF" ]; then
         [ -z "${line// /}" ] && continue
         if [[ "$line" =~ ^[[:space:]]*iface[[:space:]]+([^[:space:]]+) ]]; then
             iface="${BASH_REMATCH[1]}"
-            nft add rule inet warp_route prerouting iifname "$iface" counter meta mark set "$WARP_MARK"
+            nft add rule inet asena_route prerouting iifname "$iface" counter meta mark set "$ASENA_MARK"
             IFACE_COUNT=$((IFACE_COUNT + 1))
         fi
     done < "$ROUTE_CONF"
 fi
 
-echo "warp-route reloaded: iface_count=$IFACE_COUNT"
+echo "asena-route reloaded: iface_count=$IFACE_COUNT"
 EOF
-chmod 755 /usr/local/bin/warp-bypass-reload
+chmod 755 /usr/local/bin/asena-bypass-reload
 
-#=== /usr/local/bin/warp-dnsmasq-gen ==========================================
-say "Writing /usr/local/bin/warp-dnsmasq-gen…"
-cat > /usr/local/bin/warp-dnsmasq-gen << 'EOF'
+#=== /usr/local/bin/asena-dnsmasq-gen ==========================================
+say "Writing /usr/local/bin/asena-dnsmasq-gen…"
+cat > /usr/local/bin/asena-dnsmasq-gen << 'EOF'
 #!/usr/bin/env bash
-# warp-blacklist.txt'ten dnsmasq nftset config'i uret.
-# Her domain icin DNS sorgusu aninda warp_hosts (v4) ve warp_hosts6 (v6)
+# asena-blacklist.txt'ten dnsmasq nftset config'i uret.
+# Her domain icin DNS sorgusu aninda asena_hosts (v4) ve asena_hosts6 (v6)
 # set'lerine IP eklenir. v6 set'i fail-closed reject icin kullanilir.
 # Runs as root via sudoers NOPASSWD.
 
@@ -308,11 +308,11 @@ USER_NAME="${SUDO_USER:-}"
 { [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; } && USER_NAME=$(id -nu 1000 2>/dev/null)
 USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
 
-BLACKLIST="$USER_HOME/.config/warp-blacklist.txt"
-OUTPUT="/etc/dnsmasq-warp.conf"
+BLACKLIST="$USER_HOME/.config/asena-blacklist.txt"
+OUTPUT="/etc/dnsmasq-asena.conf"
 
 cat > "$OUTPUT" << 'HEADER'
-# dnsmasq-warp.conf — warp-on tarafindan olusturulur, elle duzenleme.
+# dnsmasq-asena.conf — asena-on tarafindan olusturulur, elle duzenleme.
 listen-address=127.0.0.2
 bind-interfaces
 port=53
@@ -326,7 +326,7 @@ log-queries=no
 HEADER
 
 if [ ! -f "$BLACKLIST" ]; then
-    echo "warp-dnsmasq-gen: blacklist bulunamadi: $BLACKLIST, bos config yaziliyor" >&2
+    echo "asena-dnsmasq-gen: blacklist bulunamadi: $BLACKLIST, bos config yaziliyor" >&2
     exit 0
 fi
 
@@ -335,63 +335,63 @@ while IFS= read -r line || [ -n "$line" ]; do
     line=$(printf '%s' "$line" | tr -d '\r' | sed 's/#.*//' | xargs)
     [ -z "$line" ] && continue
     domain="${line#\*.}"
-    printf 'nftset=/%s/4#inet#warp_route#warp_hosts\n' "$domain"
-    printf 'nftset=/%s/6#inet#warp_route#warp_hosts6\n' "$domain"
+    printf 'nftset=/%s/4#inet#asena_route#asena_hosts\n' "$domain"
+    printf 'nftset=/%s/6#inet#asena_route#asena_hosts6\n' "$domain"
 done < "$BLACKLIST" | sort -u >> "$OUTPUT"
 
-echo "warp-dnsmasq-gen: $(grep -c '^nftset' "$OUTPUT") nftset satiri yazildi -> $OUTPUT"
+echo "asena-dnsmasq-gen: $(grep -c '^nftset' "$OUTPUT") nftset satiri yazildi -> $OUTPUT"
 EOF
-chmod 755 /usr/local/bin/warp-dnsmasq-gen
+chmod 755 /usr/local/bin/asena-dnsmasq-gen
 
-#=== /usr/local/bin/warp-dns-reload ===========================================
-say "Writing /usr/local/bin/warp-dns-reload…"
-cat > /usr/local/bin/warp-dns-reload << 'EOF'
+#=== /usr/local/bin/asena-dns-reload ===========================================
+say "Writing /usr/local/bin/asena-dns-reload…"
+cat > /usr/local/bin/asena-dns-reload << 'EOF'
 #!/usr/bin/env bash
 # Blacklist'i yeniden uret ve dnsmasq'i yeniden baslat.
 # Runs as root via sudoers NOPASSWD.
 set -e
 
-# WARP acik degilse nftset hedef tablosu (inet warp_route) yok — yenileme anlamsiz.
-if ! nft list table inet warp_route >/dev/null 2>&1; then
-    echo "warp-dns-reload: WARP kapali, atlandi" >&2
+# Asena acik degilse nftset hedef tablosu (inet asena_route) yok — yenileme anlamsiz.
+if ! nft list table inet asena_route >/dev/null 2>&1; then
+    echo "asena-dns-reload: Asena kapali, atlandi" >&2
     exit 0
 fi
 
-pkill -f "dnsmasq.*warp" 2>/dev/null || true
+pkill -f "dnsmasq.*asena" 2>/dev/null || true
 sleep 0.3
-/usr/local/bin/warp-dnsmasq-gen
-dnsmasq -C /etc/dnsmasq-warp.conf --pid-file=/run/dnsmasq-warp.pid
+/usr/local/bin/asena-dnsmasq-gen
+dnsmasq -C /etc/dnsmasq-asena.conf --pid-file=/run/dnsmasq-asena.pid
 # systemd-resolved cache'ini bosalt — yeni blacklist domainleri taze sorgulanip
-# warp_hosts'a eklensin (yoksa cache'li eski IP fiziksel'den gider).
+# asena_hosts'a eklensin (yoksa cache'li eski IP fiziksel'den gider).
 resolvectl flush-caches 2>/dev/null || true
 echo "DNS reloaded"
 EOF
-chmod 755 /usr/local/bin/warp-dns-reload
+chmod 755 /usr/local/bin/asena-dns-reload
 
 #=== sudoers ===================================================================
-say "Configuring sudoers (NOPASSWD: warp-on/off/bypass-reload/dnsmasq-gen/dns-reload)…"
+say "Configuring sudoers (NOPASSWD: asena-on/off/bypass-reload/dnsmasq-gen/dns-reload)…"
 TMP_SUDO=$(mktemp)
 trap 'rm -f "$TMP_SUDO"' EXIT
-printf '%s ALL=(root) NOPASSWD: /usr/local/bin/warp-on, /usr/local/bin/warp-on http2, /usr/local/bin/warp-on http3, /usr/local/bin/warp-off, /usr/local/bin/warp-bypass-reload, /usr/local/bin/warp-dnsmasq-gen, /usr/local/bin/warp-dns-reload\n' \
+printf '%s ALL=(root) NOPASSWD: /usr/local/bin/asena-on, /usr/local/bin/asena-on http2, /usr/local/bin/asena-on http3, /usr/local/bin/asena-off, /usr/local/bin/asena-bypass-reload, /usr/local/bin/asena-dnsmasq-gen, /usr/local/bin/asena-dns-reload\n' \
     "$TARGET_USER" > "$TMP_SUDO"
 visudo -cf "$TMP_SUDO" >/dev/null || die "Generated sudoers fails visudo validation"
-install -m 440 "$TMP_SUDO" /etc/sudoers.d/warp
+install -m 440 "$TMP_SUDO" /etc/sudoers.d/asena
 
-#=== ~/.local/bin/warp-tray ===================================================
-say "Installing tray app to $TARGET_HOME/.local/bin/warp-tray…"
+#=== ~/.local/bin/asena-tray ===================================================
+say "Installing tray app to $TARGET_HOME/.local/bin/asena-tray…"
 install -d -o "$TARGET_USER" -g "$TARGET_USER" "$TARGET_HOME/.local/bin"
-cat > "$TARGET_HOME/.local/bin/warp-tray" << 'PYEOF'
+cat > "$TARGET_HOME/.local/bin/asena-tray" << 'PYEOF'
 #!/usr/bin/env python3
 """
-WARP system tray indicator (Hyprland + Quickshell-friendly).
+Asena system tray indicator (Hyprland + Quickshell-friendly).
 
 - Left click: toggle. If off → connect via HTTP/2. If on → disconnect.
 - Right click menu:
     Disconnect
     HTTP/2     (checked when active mode)
     HTTP/3     (checked when active mode)
-    Force WARP ▸
-        Through WARP:
+    Force Asena ▸
+        Through Asena:
             ✓ <entry>          [click to remove]
         Add interface…         [text input dialog]
         Add running app ▸      [Hyprland clients]
@@ -400,15 +400,15 @@ WARP system tray indicator (Hyprland + Quickshell-friendly).
         N domain kayıtlı
         Düzenle…               [opens file in xdg-open]
         Domain ekle…           [text input dialog]
-        DNS yenile             [runs warp-dns-reload]
+        DNS yenile             [runs asena-dns-reload]
     Quit
 
 - Mode detection: parses `pgrep -af usque` for the --http2 flag.
-- Route config: ~/.config/warp-route.conf  (lines: 'iface <name>', 'app <path>').
-- Blacklist: ~/.config/warp-blacklist.txt  (one domain per line).
-- Physical is default route; only listed apps/ifaces/domains go through WARP.
-- App WARP: PID moved into warp-only.slice cgroup. Polling every 3s.
-- Domain WARP: dnsmasq nftset populates warp_hosts on DNS queries.
+- Route config: ~/.config/asena-route.conf  (lines: 'iface <name>', 'app <path>').
+- Blacklist: ~/.config/asena-blacklist.txt  (one domain per line).
+- Physical is default route; only listed apps/ifaces/domains go through Asena.
+- App Asena: PID moved into asena-only.slice cgroup. Polling every 3s.
+- Domain Asena: dnsmasq nftset populates asena_hosts on DNS queries.
 """
 import fnmatch
 import json
@@ -422,17 +422,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QPen, QBrush, QPixmap, QFont
 from PySide6.QtCore import QTimer, Qt, QRect
 
-WARP_OFF = ["sudo", "-n", "/usr/local/bin/warp-off"]
-BYPASS_RELOAD = ["sudo", "-n", "/usr/local/bin/warp-bypass-reload"]
-DNS_RELOAD = ["sudo", "-n", "/usr/local/bin/warp-dns-reload"]
-CONF_PATH = Path.home() / ".config" / "warp-route.conf"
-BLACKLIST_PATH = Path.home() / ".config" / "warp-blacklist.txt"
-SLICE_NAME = "warp-only.slice"
+ASENA_OFF = ["sudo", "-n", "/usr/local/bin/asena-off"]
+BYPASS_RELOAD = ["sudo", "-n", "/usr/local/bin/asena-bypass-reload"]
+DNS_RELOAD = ["sudo", "-n", "/usr/local/bin/asena-dns-reload"]
+CONF_PATH = Path.home() / ".config" / "asena-route.conf"
+BLACKLIST_PATH = Path.home() / ".config" / "asena-blacklist.txt"
+SLICE_NAME = "asena-only.slice"
 SLICE_PROCS = None  # resolved at startup
 
 
-def warp_on_cmd(mode: str) -> list[str]:
-    return ["sudo", "-n", "/usr/local/bin/warp-on", mode]
+def asena_on_cmd(mode: str) -> list[str]:
+    return ["sudo", "-n", "/usr/local/bin/asena-on", mode]
 
 
 ICON_SIZE = 64
@@ -440,7 +440,7 @@ COLOR_CONNECTED = QColor(76, 175, 80)
 COLOR_DISCONNECTED = QColor(158, 158, 158)
 
 
-# ---------------------------------------------------------------- WARP state
+# ---------------------------------------------------------------- Asena state
 
 def current_mode() -> str | None:
     """Returns 'http2', 'http3', or None (disconnected)."""
@@ -481,11 +481,11 @@ def read_conf() -> dict[str, list[str]]:
 
 def write_conf(data: dict[str, list[str]]) -> None:
     header = (
-        "# WARP route list. Tray bu dosyayı okur ve yazar; elle de düzenleyebilirsin.\n"
-        "# Physical default route; sadece buradakiler WARP'tan gecer.\n"
+        "# Asena route list. Tray bu dosyayı okur ve yazar; elle de düzenleyebilirsin.\n"
+        "# Physical default route; sadece buradakiler Asena'tan gecer.\n"
         "# Format:\n"
-        "#   iface <name>            bu interface'ten gelen tüm trafik WARP'tan gecer\n"
-        "#   app   <executable-path> bu exe ile calisan process'ler WARP'tan gecer\n"
+        "#   iface <name>            bu interface'ten gelen tüm trafik Asena'tan gecer\n"
+        "#   app   <executable-path> bu exe ile calisan process'ler Asena'tan gecer\n"
         "# Yorum satırları # ile baslar, bos satırlar yok sayılır.\n"
         "\n"
     )
@@ -617,14 +617,14 @@ def make_icon(connected: bool) -> QIcon:
 
 def notify(title: str, body: str, icon: str = "network-vpn") -> None:
     subprocess.Popen(
-        ["notify-send", "-a", "WARP", "-i", icon, "-t", "2000", title, body],
+        ["notify-send", "-a", "Asena", "-i", icon, "-t", "2000", title, body],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
 
 
 # ---------------------------------------------------------------- Tray
 
-class WarpTray:
+class AsenaTray:
     def __init__(self):
         global SLICE_PROCS
         SLICE_PROCS = resolve_slice_procs()
@@ -651,7 +651,7 @@ class WarpTray:
         self.http3_action.setCheckable(True)
         self.http3_action.triggered.connect(lambda: self.set_mode("http3"))
 
-        self.bypass_menu = QMenu("Force WARP")
+        self.bypass_menu = QMenu("Force Asena")
         self.blacklist_menu = QMenu("Blacklist")
 
         quit_action = QAction("Quit")
@@ -679,7 +679,7 @@ class WarpTray:
         self.timer.timeout.connect(self.refresh)
         self.timer.start(3000)
 
-    # -------- WARP toggle
+    # -------- Asena toggle
 
     def _on_click(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -689,7 +689,7 @@ class WarpTray:
                 self.disconnect()
 
     def disconnect(self):
-        subprocess.Popen(WARP_OFF, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(ASENA_OFF, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         QTimer.singleShot(1500, self.refresh)
 
     def set_mode(self, target: str):
@@ -697,14 +697,14 @@ class WarpTray:
         if cur == target:
             return
         if cur is not None:
-            subprocess.run(WARP_OFF, capture_output=True)
+            subprocess.run(ASENA_OFF, capture_output=True)
             QTimer.singleShot(1500, lambda: self._launch(target))
         else:
             self._launch(target)
 
     def _launch(self, mode: str):
         subprocess.Popen(
-            warp_on_cmd(mode),
+            asena_on_cmd(mode),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         QTimer.singleShot(3500, self.refresh)
@@ -717,12 +717,12 @@ class WarpTray:
             return
         conf = read_conf()
         if name in conf["iface"]:
-            notify("Force WARP", f"{name} already in list")
+            notify("Force Asena", f"{name} already in list")
             return
         conf["iface"].append(name)
         write_conf(conf)
         subprocess.Popen(BYPASS_RELOAD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        notify(f"WARP'a eklendi: {name}", "Interface trafiği artik WARP'tan geciyor.")
+        notify(f"Asena'a eklendi: {name}", "Interface trafiği artik Asena'tan geciyor.")
         QTimer.singleShot(500, self.rebuild_bypass_menu)
 
     def remove_iface(self, name: str):
@@ -732,7 +732,7 @@ class WarpTray:
         conf["iface"].remove(name)
         write_conf(conf)
         subprocess.Popen(BYPASS_RELOAD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        notify(f"WARP'tan cikarildi: {name}", "Interface artik normal internete gidiyor.")
+        notify(f"Asena'tan cikarildi: {name}", "Interface artik normal internete gidiyor.")
         QTimer.singleShot(500, self.rebuild_bypass_menu)
 
     def add_app(self, exe_path: str, pid: int | None = None):
@@ -750,7 +750,7 @@ class WarpTray:
                     add_pid_to_slice(p)
         name = Path(exe_path).name
         notify(
-            f"WARP'a eklendi: {name}",
+            f"Asena'a eklendi: {name}",
             "Tam etkili olması icin uygulamayı yeniden baslat.",
         )
         QTimer.singleShot(500, self.rebuild_bypass_menu)
@@ -766,7 +766,7 @@ class WarpTray:
                 remove_pid_from_slice(pid)
         name = Path(exe_path).name
         notify(
-            f"WARP'tan cikarildi: {name}",
+            f"Asena'tan cikarildi: {name}",
             "Tam etkili olması icin uygulamayı yeniden baslat.",
         )
         QTimer.singleShot(500, self.rebuild_bypass_menu)
@@ -782,14 +782,14 @@ class WarpTray:
                 pids.append(pid)
         return pids
 
-    # -------- Force WARP menu
+    # -------- Force Asena menu
 
     def rebuild_bypass_menu(self):
         self.bypass_menu.clear()
         conf = read_conf()
 
         if conf["iface"] or conf["app"]:
-            hdr = self.bypass_menu.addAction("Through WARP:")
+            hdr = self.bypass_menu.addAction("Through Asena:")
             hdr.setEnabled(False)
             for name in conf["iface"]:
                 a = self.bypass_menu.addAction(f"  ✓ {name}  (iface)")
@@ -823,7 +823,7 @@ class WarpTray:
         refresh.triggered.connect(self.rebuild_bypass_menu)
 
     def prompt_add_iface(self):
-        name, ok = QInputDialog.getText(None, "Add interface to Force WARP", "Interface name (e.g. waydroid0):")
+        name, ok = QInputDialog.getText(None, "Add interface to Force Asena", "Interface name (e.g. waydroid0):")
         if ok and name.strip():
             self.add_iface(name.strip())
 
@@ -883,10 +883,10 @@ class WarpTray:
 
     def reload_dns(self):
         if current_mode() is None:
-            notify("WARP Blacklist", "Önce WARP'ı aç — kapalıyken DNS yenilenmez.")
+            notify("Asena Blacklist", "Önce Asena'ı aç — kapalıyken DNS yenilenmez.")
             return
         subprocess.Popen(DNS_RELOAD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        notify("WARP Blacklist", "DNS yenileniyor…")
+        notify("Asena Blacklist", "DNS yenileniyor…")
 
     # -------- Polling
 
@@ -896,10 +896,10 @@ class WarpTray:
 
         if active:
             self.tray.setIcon(self.icon_on)
-            self.tray.setToolTip(f"WARP: Connected ({mode.upper().replace('HTTP', 'HTTP/')})")
+            self.tray.setToolTip(f"Asena: Connected ({mode.upper().replace('HTTP', 'HTTP/')})")
         else:
             self.tray.setIcon(self.icon_off)
-            self.tray.setToolTip("WARP: Disconnected")
+            self.tray.setToolTip("Asena: Disconnected")
 
         self.disconnect_action.setEnabled(active)
         self.http2_action.setChecked(mode == "http2")
@@ -927,7 +927,7 @@ class WarpTray:
             else:
                 body = f"Connected ({mode.upper().replace('HTTP', 'HTTP/')})"
                 icon = "network-vpn"
-            notify("WARP", body, icon)
+            notify("Asena", body, icon)
         self._last_mode = mode
         self._initialized = True
 
@@ -936,37 +936,37 @@ class WarpTray:
 
 
 if __name__ == "__main__":
-    WarpTray().run()
+    AsenaTray().run()
 PYEOF
-chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/warp-tray"
-chmod 755 "$TARGET_HOME/.local/bin/warp-tray"
+chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/asena-tray"
+chmod 755 "$TARGET_HOME/.local/bin/asena-tray"
 
 #=== ~/.local/bin/discord wrapper =============================================
 say "Installing Discord launcher wrapper to $TARGET_HOME/.local/bin/discord…"
 cat > "$TARGET_HOME/.local/bin/discord" << 'EOF'
 #!/usr/bin/env bash
-# Discord'u warp-only.slice icinde baslatir — WARP'tan geciyor.
+# Discord'u asena-only.slice icinde baslatir — Asena'tan geciyor.
 DISCORD_BIN=$(find "$HOME/.config/discord" -maxdepth 2 -name "Discord" -type f 2>/dev/null | sort -V | tail -1)
 [ -z "$DISCORD_BIN" ] && { echo "Discord binary bulunamadi." >&2; exit 1; }
-exec systemd-run --user --slice=warp-only.slice --scope \
+exec systemd-run --user --slice=asena-only.slice --scope \
     --setenv=DISCORD_SKIP_HOST_UPDATE=true "$DISCORD_BIN" "$@"
 EOF
 chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/discord"
 chmod 755 "$TARGET_HOME/.local/bin/discord"
 
-#=== ~/.config/warp-route.conf (template) =====================================
-ROUTE_CONF="$TARGET_HOME/.config/warp-route.conf"
+#=== ~/.config/asena-route.conf (template) =====================================
+ROUTE_CONF="$TARGET_HOME/.config/asena-route.conf"
 if [ ! -f "$ROUTE_CONF" ]; then
-    say "Creating warp-route.conf template…"
+    say "Creating asena-route.conf template…"
     cat > "$ROUTE_CONF" << 'EOF'
-# WARP route list. Tray bu dosyayı okur ve yazar; elle de düzenleyebilirsin.
-# Physical default route; sadece buradakiler WARP'tan gecer.
+# Asena route list. Tray bu dosyayı okur ve yazar; elle de düzenleyebilirsin.
+# Physical default route; sadece buradakiler Asena'tan gecer.
 # Format:
-#   iface <name>            bu interface'ten gelen tüm trafik WARP'tan gecer
-#   app   <executable-path> bu exe ile calisan process'ler WARP'tan gecer
+#   iface <name>            bu interface'ten gelen tüm trafik Asena'tan gecer
+#   app   <executable-path> bu exe ile calisan process'ler Asena'tan gecer
 # Yorum satırları # ile baslar, bos satırlar yok sayılır.
 
-# Ornek: Discord'u WARP'tan gecirmek icin:
+# Ornek: Discord'u Asena'tan gecirmek icin:
 # app /home/USER/.config/discord/Discord
 EOF
     chown "$TARGET_USER:$TARGET_USER" "$ROUTE_CONF"
@@ -975,34 +975,34 @@ fi
 #=== Hyprland autostart ========================================================
 HYPR_LUA="$TARGET_HOME/.config/hypr/custom/execs.lua"
 HYPR_CONF="$TARGET_HOME/.config/hypr/hyprland.conf"
-AUTOSTART_LINE='hl.exec_cmd("sleep 4 && $HOME/.local/bin/warp-tray")'
-CONF_LINE='exec-once = sleep 4 && $HOME/.local/bin/warp-tray'
+AUTOSTART_LINE='hl.exec_cmd("sleep 4 && $HOME/.local/bin/asena-tray")'
+CONF_LINE='exec-once = sleep 4 && $HOME/.local/bin/asena-tray'
 
 if [ -f "$HYPR_LUA" ]; then
     say "Adding autostart to $HYPR_LUA…"
-    if ! grep -q 'warp-tray' "$HYPR_LUA"; then
+    if ! grep -q 'asena-tray' "$HYPR_LUA"; then
         if grep -q 'hl.on("hyprland.start"' "$HYPR_LUA"; then
             warn "Existing hl.on block — add manually inside it: $AUTOSTART_LINE"
         else
             cat >> "$HYPR_LUA" << EOF
 
 hl.on("hyprland.start", function ()
-    -- WARP tray indicator (delay so Quickshell SNI host is up)
+    -- Asena tray indicator (delay so Quickshell SNI host is up)
     $AUTOSTART_LINE
 end)
 EOF
         fi
     else
-        say "warp-tray already in execs.lua, skipping."
+        say "asena-tray already in execs.lua, skipping."
     fi
     chown "$TARGET_USER:$TARGET_USER" "$HYPR_LUA"
 elif [ -f "$HYPR_CONF" ]; then
     say "Adding autostart to $HYPR_CONF…"
-    if ! grep -q 'warp-tray' "$HYPR_CONF"; then
-        printf '\n# WARP tray indicator\n%s\n' "$CONF_LINE" >> "$HYPR_CONF"
+    if ! grep -q 'asena-tray' "$HYPR_CONF"; then
+        printf '\n# Asena tray indicator\n%s\n' "$CONF_LINE" >> "$HYPR_CONF"
         chown "$TARGET_USER:$TARGET_USER" "$HYPR_CONF"
     else
-        say "warp-tray already in hyprland.conf, skipping."
+        say "asena-tray already in hyprland.conf, skipping."
     fi
 else
     warn "No Hyprland config found — add manually: $CONF_LINE"
@@ -1020,23 +1020,23 @@ fi
 cat << EOF
 
 ────────────────────────────────────────────────────────────────────
-  Installed! (selective routing — physical default, WARP on demand)
+  Installed! (selective routing — physical default, Asena on demand)
 ────────────────────────────────────────────────────────────────────
-  Scripts   : warp-on [http2|http3]  warp-off  warp-bypass-reload
-              warp-dnsmasq-gen  warp-dns-reload
-  Sudoers   : /etc/sudoers.d/warp  (NOPASSWD, scoped)
-  Tray app  : $TARGET_HOME/.local/bin/warp-tray
-  Discord   : $TARGET_HOME/.local/bin/discord  (runs in warp-only.slice)
-  Route conf: $TARGET_HOME/.config/warp-route.conf
-  Blacklist : $TARGET_HOME/.config/warp-blacklist.txt  (domain per line)
-  Usque cfg : $USQUE_CONFIG  (BACK THIS UP — your WARP identity!)
+  Scripts   : asena-on [http2|http3]  asena-off  asena-bypass-reload
+              asena-dnsmasq-gen  asena-dns-reload
+  Sudoers   : /etc/sudoers.d/asena  (NOPASSWD, scoped)
+  Tray app  : $TARGET_HOME/.local/bin/asena-tray
+  Discord   : $TARGET_HOME/.local/bin/discord  (runs in asena-only.slice)
+  Route conf: $TARGET_HOME/.config/asena-route.conf
+  Blacklist : $TARGET_HOME/.config/asena-blacklist.txt  (domain per line)
+  Usque cfg : $USQUE_CONFIG  (BACK THIS UP — your Asena identity!)
 
   Start now:
-    nohup ~/.local/bin/warp-tray >/dev/null 2>&1 & disown
+    nohup ~/.local/bin/asena-tray >/dev/null 2>&1 & disown
 
   Daily use:
-    Left click   = toggle WARP
-    Force WARP   = specific apps/interfaces through WARP
+    Left click   = toggle Asena
+    Force Asena   = specific apps/interfaces through Asena
     Blacklist     = manage domain list + reload DNS
 
   After reboot, Hyprland starts the tray automatically.

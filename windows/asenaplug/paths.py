@@ -22,35 +22,35 @@ RUN_DIR       = DATA_DIR / "run"
 LOG_FILE      = DATA_DIR / "usque.log"
 SETUP_FLAG    = DATA_DIR / "installed.flag"
 
-BLACKLIST_PATH = CONFIG_DIR / "warp-blacklist.txt"
+BLACKLIST_PATH = CONFIG_DIR / "asena-blacklist.txt"
 CONFIG_JSON    = CONFIG_DIR / "config.json"          # usque cihaz kimliği
 STATE_FILE     = RUN_DIR / "state.json"              # gerçek çalışan durum
 DESIRED_FILE   = RUN_DIR / "desired.json"            # tray'in istediği
-RESOLVED_FILE  = RUN_DIR / "warp-resolved-ips.txt"   # route-sync IP defteri
+RESOLVED_FILE  = RUN_DIR / "asena-resolved-ips.txt"   # route-sync IP defteri
 
 TUN_NAME = "usque"
 
 # Kullanıcıya görünen uygulama adı (tray, bildirimler, exe). İç tanımlayıcılar
-# (usque yolları, WarpTray_* görevleri, warp_tray paketi) aynı kalır.
+# (usque yolları, AsenaPlug_* görevleri, asenaplug paketi) aynı kalır.
 APP_NAME = "AsenaPlug"
 
 # --- Varsayılan mod ---
 DEFAULT_TRANSPORT = "http2"      # DPI-stealth; TR'de dayanıklı
-DEFAULT_SCOPE     = "selective"  # fiziksel default, sadece blacklist WARP'tan
+DEFAULT_SCOPE     = "selective"  # fiziksel default, sadece blacklist Asena'tan
 
 TRANSPORTS = ("http2", "http3")
 SCOPES     = ("selective", "full")
 
 # --- Task Scheduler görev adları ---
 # Privilege modeli: tray, logon'da YÜKSELTİLMİŞ (Highest) bir görevle başlar
-# (UAC promptu yok). Elevated tray, warp-*.ps1'i DOĞRUDAN admin olarak çalıştırır
+# (UAC promptu yok). Elevated tray, asena-*.ps1'i DOĞRUDAN admin olarak çalıştırır
 # (win.run_script). Bu yüzden ayrı on/off/dns SYSTEM görevine gerek yok; standart
 # kullanıcının SYSTEM görevini tetikleme izni sorunu (SDDL/ACL cerrahisi) da kalkar.
 #   tray       — logon'da elevated tray (kullanıcı principal, Highest)
-#   route_sync — SYSTEM daemon; warp-on Start-ScheduledTask ile tetikler
+#   route_sync — SYSTEM daemon; asena-on Start-ScheduledTask ile tetikler
 #   rescue     — boot+logon SYSTEM kurtarma (DNS/route artığı temizle)
 TASKS = {
-    "tray":       "WarpTray_Tray",
-    "route_sync": "WarpTray_RouteSync",
-    "rescue":     "WarpTray_Rescue",
+    "tray":       "AsenaPlug_Tray",
+    "route_sync": "AsenaPlug_RouteSync",
+    "rescue":     "AsenaPlug_Rescue",
 }

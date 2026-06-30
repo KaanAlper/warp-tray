@@ -1,4 +1,4 @@
-"""windows/ dizinini sys.path'e ekler ki testler `warp_tray` paketini import edebilsin."""
+"""windows/ dizinini sys.path'e ekler ki testler `asenaplug` paketini import edebilsin."""
 import sys
 from pathlib import Path
 

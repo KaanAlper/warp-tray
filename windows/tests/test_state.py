@@ -2,8 +2,8 @@
 
 Çalıştır:  cd windows && python -m pytest tests/   (veya python tests/test_state.py)
 """
-from warp_tray import state
-from warp_tray.paths import DEFAULT_TRANSPORT, DEFAULT_SCOPE
+from asenaplug import state
+from asenaplug.paths import DEFAULT_TRANSPORT, DEFAULT_SCOPE
 
 
 # --- normalize_domain ---
@@ -55,7 +55,7 @@ def test_coerce_invalid_falls_back():
 
 
 def test_read_state_handles_powershell_bom():
-    """Regresyon: warp-on.ps1 (PS 5.1) state.json'ı BOM'lu yazar; read_state
+    """Regresyon: asena-on.ps1 (PS 5.1) state.json'ı BOM'lu yazar; read_state
     utf-8-sig ile BOM'u atıp parse edebilmeli (yoksa hep None -> tray hep
     disconnected)."""
     import json as _json

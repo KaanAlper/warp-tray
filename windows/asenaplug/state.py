@@ -4,10 +4,10 @@
   transport: http2 | http3   (taşıma katmanı)
   scope:     selective | full (routing kapsamı)
 
-  desired.json — tray'in İSTEDİĞİ (tray yazar, warp-on.ps1 okur)
-  state.json   — GERÇEKTE çalışan durum (warp-on.ps1 yazar, warp-off.ps1 siler)
+  desired.json — tray'in İSTEDİĞİ (tray yazar, asena-on.ps1 okur)
+  state.json   — GERÇEKTE çalışan durum (asena-on.ps1 yazar, asena-off.ps1 siler)
 
-Tray "WARP açık mı + hangi modda?" sorusunu `current_state()` ile yanıtlar:
+Tray "Asena açık mı + hangi modda?" sorusunu `current_state()` ile yanıtlar:
 adapter gerçekten ayakta MI + state.json ne diyor. Eski koddaki import edilmemiş
 `psutil` + çıplak except (hep None → hep disconnected) hatası böyle çözülür.
 
@@ -48,7 +48,7 @@ def write_desired(transport: str, scope: str):
 
 
 def read_state() -> dict | None:
-    # utf-8-sig ŞART: warp-on.ps1 (PowerShell 5.1) state.json'ı BOM'lu yazar;
+    # utf-8-sig ŞART: asena-on.ps1 (PowerShell 5.1) state.json'ı BOM'lu yazar;
     # düz utf-8 ile json.loads BOM'da patlar -> hep None -> tray hep "disconnected".
     try:
         return json.loads(STATE_FILE.read_text(encoding="utf-8-sig"))
@@ -57,10 +57,10 @@ def read_state() -> dict | None:
 
 
 def current_state() -> dict | None:
-    """WARP gerçekten açık mı? Açıksa {transport, scope}, değilse None.
+    """Asena gerçekten açık mı? Açıksa {transport, scope}, değilse None.
 
-    state.json TEK doğru kaynaktır (warp-on adapter geldikten SONRA yazar,
-    warp-off siler). state.json yoksa -> bağlı değil (None). ÖNEMLİ: adapter
+    state.json TEK doğru kaynaktır (asena-on adapter geldikten SONRA yazar,
+    asena-off siler). state.json yoksa -> bağlı değil (None). ÖNEMLİ: adapter
     ayakta ama state.json yokken (off->on teardown anı) sahte 'http2' DÖNDÜRMEZ
     — yoksa mod değişiminde tray kısa süre http2 gösterip yanıltıyordu.
     """

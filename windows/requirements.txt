@@ -1,4 +1,4 @@
-# warp-tray Windows — build + runtime bağımlılıkları
+# asena Windows — build + runtime bağımlılıkları
 # ÖNEMLİ: CPython 3.10+ ile kur. PyPy ile DEĞİL (PySide6/PyInstaller PyPy'de çalışmaz).
 PySide6>=6.6
 winotify>=1.1

@@ -23,8 +23,8 @@ APP_EXE = INSTALL_DIR / f"{APP_NAME}.exe"
 CREATE_NO_WINDOW = 0x08000000
 
 SCRIPT_NAMES = [
-    "warp-on.ps1", "warp-off.ps1", "warp-dns-reload.ps1",
-    "warp-route-sync.ps1", "warp-rescue.ps1",
+    "asena-on.ps1", "asena-off.ps1", "asena-dns-reload.ps1",
+    "asena-route-sync.ps1", "asena-rescue.ps1", "asena-uninstall.ps1",
 ]
 
 
@@ -108,7 +108,7 @@ def run_setup():
     if not BLACKLIST_PATH.exists():
         BLACKLIST_PATH.write_text(
             "# Domain blacklist — satır başına bir domain.\n"
-            "# Sadece 'Sadece blacklist' (selective) modunda WARP'tan geçer.\n"
+            "# Sadece 'Sadece blacklist' (selective) modunda Asena'tan geçer.\n"
             "# Örnek:\n"
             "# nhentai.net\n"
             "# twitter.com\n",
@@ -119,7 +119,7 @@ def run_setup():
     if not CONFIG_JSON.exists():
         _run_usque_register()
 
-    # 8. Tamamlandı (autostart = WarpTray_Tray logon görevi, adım 5'te kuruldu)
+    # 8. Tamamlandı (autostart = AsenaPlug_Tray logon görevi, adım 5'te kuruldu)
     SETUP_FLAG.touch()
 
 
@@ -189,10 +189,10 @@ def _tray_launch():
 
 
 def _register_tasks():
-    # SYSTEM görevleri: route_sync (daemon, warp-on tetikler), rescue (boot+logon)
+    # SYSTEM görevleri: route_sync (daemon, asena-on tetikler), rescue (boot+logon)
     sys_defs = [
-        (TASKS["route_sync"], "warp-route-sync.ps1", "(New-TimeSpan -Days 3650)", None),
-        (TASKS["rescue"],     "warp-rescue.ps1",     "(New-TimeSpan -Minutes 1)", "rescue"),
+        (TASKS["route_sync"], "asena-route-sync.ps1", "(New-TimeSpan -Days 3650)", None),
+        (TASKS["rescue"],     "asena-rescue.ps1",     "(New-TimeSpan -Minutes 1)", "rescue"),
     ]
     blocks = []
     for name, script, limit, trig in sys_defs:

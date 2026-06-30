@@ -13,11 +13,11 @@ $DataDir      = Join-Path $env:ProgramData "usque"
 $ConfigDir    = Join-Path $DataDir "config"
 $RunDir       = Join-Path $DataDir "run"
 $LogFile      = Join-Path $DataDir "usque.log"
-$BlacklistTxt = Join-Path $ConfigDir "warp-blacklist.txt"
-$ResolvedFile = Join-Path $RunDir "warp-resolved-ips.txt"
+$BlacklistTxt = Join-Path $ConfigDir "asena-blacklist.txt"
+$ResolvedFile = Join-Path $RunDir "asena-resolved-ips.txt"
 $DnsproxyExe  = Join-Path (Join-Path $env:ProgramFiles "usque") "dnsproxy.exe"
 $TunName      = "usque"
-$V6Rule       = "WarpTray-IPv6-FailClosed"
+$V6Rule       = "AsenaPlug-IPv6-FailClosed"
 $ListenDns    = "127.0.0.2"
 $UpstreamDns1 = "1.1.1.1:53"
 $UpstreamDns2 = "1.0.0.1:53"
@@ -30,12 +30,12 @@ function Write-Log($msg) {
 
 $tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
 if (-not $tun) {
-    Write-Log "WARP kapalı — atlandı."
+    Write-Log "Asena kapalı — atlandı."
     exit 0
 }
 
 Clear-DnsClientCache -ErrorAction SilentlyContinue
-Stop-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName "AsenaPlug_RouteSync" -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
 # Eski /32 host route'ları + v6 kuralı + defter + eski NRPT kurallarımızı temizle
@@ -82,7 +82,7 @@ while (-not $ok -and $tries -lt 10) {
 }
 
 if ($ok) {
-    # resolver IP'lerini WARP tüneline route et (zehirsiz DNS) — /32 temizliğinde silindi
+    # resolver IP'lerini Asena tüneline route et (zehirsiz DNS) — /32 temizliğinde silindi
     foreach ($r in $Resolvers) {
         Get-NetRoute -DestinationPrefix "$r/32" -ErrorAction SilentlyContinue |
             Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
@@ -90,7 +90,7 @@ if ($ok) {
     }
     $ns = @($domains | ForEach-Object { "." + $_ })
     Add-DnsClientNrptRule -Namespace $ns -NameServers $ListenDns -ErrorAction SilentlyContinue
-    Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName "AsenaPlug_RouteSync" -ErrorAction SilentlyContinue
     Write-Log "tamam — $($domains.Count) domain NRPT, resolver'lar tünelden, route-sync başlatıldı."
 } else {
     Write-Log "UYARI: dnsproxy dinlemedi — NRPT eklenmedi."

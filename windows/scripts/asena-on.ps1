@@ -27,7 +27,7 @@ $ConfigDir    = Join-Path $DataDir "config"
 $RunDir       = Join-Path $DataDir "run"
 $LogFile      = Join-Path $DataDir "usque.log"
 $ConfigJson   = Join-Path $ConfigDir "config.json"
-$BlacklistTxt = Join-Path $ConfigDir "warp-blacklist.txt"
+$BlacklistTxt = Join-Path $ConfigDir "asena-blacklist.txt"
 $StateFile    = Join-Path $RunDir "state.json"
 $DesiredFile  = Join-Path $RunDir "desired.json"
 $StdoutLog    = Join-Path $DataDir "usque-stdout.log"
@@ -35,15 +35,15 @@ $StderrLog    = Join-Path $DataDir "usque-stderr.log"
 
 $TunName      = "usque"
 $ListenDns    = "127.0.0.2"
-# dnsproxy upstream: sorgular WARP TÜNELİNDEN geçer (resolver IP'leri TUN'a
+# dnsproxy upstream: sorgular Asena TÜNELİNDEN geçer (resolver IP'leri TUN'a
 # route'lanır) -> ISP zehirleyemez. Yandex:1253 düz-DNS artık TR'de zehirleniyordu.
 $UpstreamDns1 = "1.1.1.1:53"
 $UpstreamDns2 = "1.0.0.1:53"
 $Resolvers    = @("1.1.1.1", "1.0.0.1")   # /32 -> TUN
 $FullDns      = "1.1.1.1"          # full modda DNS tünelden geçer
-# Cloudflare WARP endpoint altyapısı (içerik DEĞİL — bunları fiziksel'de pinlemek
+# Cloudflare MASQUE endpoint altyapısı (içerik DEĞİL — bunları fiziksel'de pinlemek
 # güvenli; usque'nin kendi bağlantısı tünele girip loop yapmasın). 162.159.192.0/19
-# tüm WARP endpoint /24'lerini kapsar (.192/.193/.195/.198/.204).
+# tüm Asena endpoint /24'lerini kapsar (.192/.193/.195/.198/.204).
 $CfRanges     = @("162.159.192.0/19")
 
 foreach ($d in @($RunDir, $ConfigDir, $DataDir)) {
@@ -69,7 +69,7 @@ if ($Transport) { $transport = $Transport }
 if ($Scope)     { $scope     = $Scope }
 if ($transport -notin @("http2","http3")) { $transport = "http2" }
 if ($scope     -notin @("selective","full")) { $scope = "selective" }
-Write-Log "warp-on: transport=$transport scope=$scope (arg: '$Transport'/'$Scope')"
+Write-Log "asena-on: transport=$transport scope=$scope (arg: '$Transport'/'$Scope')"
 
 # --- 1. usque başlat ---
 $usque = Get-Process -Name "usque" -ErrorAction SilentlyContinue
@@ -131,7 +131,7 @@ function Add-Pin([string]$prefix) {
     Write-Log "Endpoint pin: $prefix -> $physIface"
 }
 
-# http2 (TCP) ise gerçek endpoint'i bul; bulunamazsa (http3/UDP) WARP aralıklarını pinle
+# http2 (TCP) ise gerçek endpoint'i bul; bulunamazsa (http3/UDP) Asena aralıklarını pinle
 $endpoint = $null
 try {
     $endpoint = (Get-NetTCPConnection -OwningProcess $usquePid -RemotePort 443 `
@@ -139,7 +139,7 @@ try {
                  Select-Object -First 1).RemoteAddress
 } catch {}
 if ($endpoint) { Add-Pin "$endpoint/32" }
-# full modda VEYA endpoint dinamik bulunamadıysa: tüm Cloudflare WARP endpoint
+# full modda VEYA endpoint dinamik bulunamadıysa: tüm Cloudflare MASQUE endpoint
 # aralıklarını fiziksel'de pinle ki usque'nin kendi bağlantısı tünele girip loop yapmasın.
 if ($scope -eq "full" -or -not $endpoint) {
     foreach ($r in $CfRanges) { Add-Pin $r }
@@ -155,7 +155,13 @@ if ($scope -eq "full") {
             -ErrorAction SilentlyContinue | Out-Null
     }
     Set-DnsClientServerAddress -InterfaceAlias $physIface -ServerAddresses @($FullDns) -ErrorAction SilentlyContinue
-    Write-Log "FULL: split-default -> $TunName, DNS=$FullDns"
+    # IPv6 LEAK koruması: usque IPv4-only. Full modda IPv6 internet'i (2000::/3 global
+    # unicast) blokla -> uygulamalar IPv4'e (tünele) düşer, gerçek IPv6 sızmaz.
+    # (fe80::/ULA dokunulmaz.) Teardown'da AsenaPlug-Full-IPv6Block kaldırılır.
+    Remove-NetFirewallRule -Group "AsenaPlug-Full-IPv6Block" -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "AsenaPlug-Full-IPv6Block" -Group "AsenaPlug-Full-IPv6Block" `
+        -Direction Outbound -Action Block -RemoteAddress "2000::/3" -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    Write-Log "FULL: split-default -> $TunName, DNS=$FullDns, IPv6 bloklu (leak yok)"
 }
 else {
     # selective: fiziksel default kalır; TUN yüksek metric. SİSTEM DNS'İNE DOKUNMAYIZ.
@@ -196,7 +202,7 @@ else {
                 $tries++
             }
             if ($ok) {
-                # dnsproxy upstream sorgularını (1.1.1.1/1.0.0.1) WARP tüneline sok
+                # dnsproxy upstream sorgularını (1.1.1.1/1.0.0.1) Asena tüneline sok
                 # -> DNS cevabı ISP tarafından zehirlenemez, gerçek IP gelir.
                 foreach ($r in $Resolvers) {
                     Get-NetRoute -DestinationPrefix "$r/32" -ErrorAction SilentlyContinue |
@@ -215,9 +221,9 @@ else {
         } else {
             Write-Log "UYARI: dnsproxy.exe yok — blacklist DNS atlandı."
         }
-        # route-sync: blacklist IP'lerini WARP'a route et (+IPv6 fail-closed).
+        # route-sync: blacklist IP'lerini Asena'a route et (+IPv6 fail-closed).
         # Bloklamadan başlat -> connect hızlı kalsın (route'lar birkaç sn içinde dolar).
-        Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName "AsenaPlug_RouteSync" -ErrorAction SilentlyContinue
     }
 }
 
@@ -231,4 +237,4 @@ $state = [ordered]@{
     started   = (Get-Date).ToString("o")
 }
 $state | ConvertTo-Json -Compress | Set-Content -Path $StateFile -Encoding UTF8
-Write-Log "warp-on OK | $transport/$scope | pid=$usquePid | pins=$($pins -join ',')"
+Write-Log "asena-on OK | $transport/$scope | pid=$usquePid | pins=$($pins -join ',')"

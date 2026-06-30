@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Kurtarma görevi (boot + logon'da tetiklenir). Çökme / elektrik kesintisi
-    sonrası WARP düzgün kapanamadıysa: DNS'i otomatiğe alır, IPv6 fail-closed
+    sonrası Asena düzgün kapanamadıysa: DNS'i otomatiğe alır, IPv6 fail-closed
     kuralını ve TUN üzerindeki artık route'ları temizler ki sistem temiz açılsın.
 #>
 Set-StrictMode -Version 1.0
@@ -11,7 +11,7 @@ $ErrorActionPreference = "SilentlyContinue"
 $DataDir   = Join-Path $env:ProgramData "usque"
 $LogFile   = Join-Path $DataDir "usque.log"
 $TunName   = "usque"
-$V6Rule    = "WarpTray-IPv6-FailClosed"
+$V6Rule    = "AsenaPlug-IPv6-FailClosed"
 $ListenDns = "127.0.0.2"
 
 function Write-Log($msg) {
@@ -19,7 +19,7 @@ function Write-Log($msg) {
     Add-Content -Path $LogFile -Value "$ts  [rescue] $msg" -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
-# usque ayakta değilken (boot/logon ya da çökme sonrası) artık WARP yapılandırması
+# usque ayakta değilken (boot/logon ya da çökme sonrası) artık Asena yapılandırması
 # varsa temizle ki internet kesin gelsin (kullanıcının korkusu: elektrik gidince
 # DNS 127.0.0.2'de takılı kalması).
 if (-not (Get-Process -Name "usque" -ErrorAction SilentlyContinue)) {
@@ -39,6 +39,7 @@ if (-not (Get-Process -Name "usque" -ErrorAction SilentlyContinue)) {
     }
 
     Remove-NetFirewallRule -Group $V6Rule -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -Group "AsenaPlug-Full-IPv6Block" -ErrorAction SilentlyContinue
 
     $tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
     if ($tun) {

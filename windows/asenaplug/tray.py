@@ -97,7 +97,7 @@ def _make_icon_fallback(connected: bool) -> QIcon:
     return QIcon(pixmap)
 
 
-class WarpTray:
+class AsenaTray:
     def __init__(self):
         global TRAY_REF
         self.app = QApplication.instance() or QApplication([])
@@ -198,7 +198,7 @@ class WarpTray:
         info = self.blacklist_menu.addAction(f"{count} domain kayıtlı")
         info.setEnabled(False)
         if self._sel_scope == "full":
-            note = self.blacklist_menu.addAction("(full modda hepsi zaten WARP'tan)")
+            note = self.blacklist_menu.addAction("(full modda hepsi zaten Asena'tan)")
             note.setEnabled(False)
         self.blacklist_menu.addSeparator()
         self.blacklist_menu.addAction("Düzenle…").triggered.connect(self.open_blacklist)
@@ -232,7 +232,7 @@ class WarpTray:
 
     # ------------------------------------------------------------------ control
     def set_target(self, transport: str, scope: str):
-        """İstenen moda geç. transport/scope warp-on'a ARGÜMAN olarak geçer
+        """İstenen moda geç. transport/scope asena-on'a ARGÜMAN olarak geçer
         (desired.json round-trip'ine güvenmez). Ayar-değişimi bildirimi YOK;
         sadece refresh() gerçek connect/disconnect'i bildirir."""
         state.write_desired(transport, scope)          # kalıcılık (boot/route-sync)
@@ -242,15 +242,15 @@ class WarpTray:
             self._start(transport, scope)
         elif (cur["transport"], cur["scope"]) != (transport, scope):
             # Mod değişimi: önce kapat, kapandığını gör, sonra hedefle aç
-            win.run_script("warp-off.ps1")
+            win.run_script("asena-off.ps1")
             self._after_off_then_on()
 
     def _start(self, transport: str, scope: str):
-        win.run_script("warp-on.ps1", args=["-Transport", transport, "-Scope", scope])
+        win.run_script("asena-on.ps1", args=["-Transport", transport, "-Scope", scope])
         self._watch(lambda: state.current_state() is not None)
 
     def disconnect(self):
-        win.run_script("warp-off.ps1")
+        win.run_script("asena-off.ps1")
         self._watch(lambda: state.current_state() is None)
 
     def _after_off_then_on(self, attempts: int = 0):
@@ -289,7 +289,7 @@ class WarpTray:
         if state.current_state() is None:
             win.notify(f"{APP_NAME} Blacklist", f"Önce {APP_NAME}'ı aç.")
             return
-        win.run_script("warp-dns-reload.ps1")
+        win.run_script("asena-dns-reload.ps1")
         win.notify(f"{APP_NAME} Blacklist", "DNS yenileniyor…")
 
     # ------------------------------------------------------------------ poll
@@ -325,16 +325,16 @@ class WarpTray:
         self._initialized = True
 
     def emergency_cleanup(self):
-        """Kapanırken WARP açıksa SENKRON kapat ki DNS/route teardown tamamlansın.
+        """Kapanırken Asena açıksa SENKRON kapat ki DNS/route teardown tamamlansın.
 
-        Tray elevated olduğundan warp-off.ps1 doğrudan admin olarak koşar;
+        Tray elevated olduğundan asena-off.ps1 doğrudan admin olarak koşar;
         wait=True ile bitmesini bekleriz (fire-and-forget'te yarıda kalmaz)."""
         if state.current_state() is None:
             return
         try:
-            win.run_script("warp-off.ps1", wait=True, timeout=20)
+            win.run_script("asena-off.ps1", wait=True, timeout=20)
         except Exception:
-            win.run_script("warp-off.ps1")
+            win.run_script("asena-off.ps1")
 
     def run(self):
         import sys

@@ -2,17 +2,17 @@
 """AsenaPlug — Windows giriş noktası (ince).
 
 İlk çalıştırmada kurulum (admin gerekir), sonra tray olarak çalışır.
-Tüm mantık `warp_tray/` paketinde. PyInstaller ile tek exe'ye paketlenir;
+Tüm mantık `asenaplug/` paketinde. PyInstaller ile tek exe'ye paketlenir;
 geliştirme için `pythonw AsenaPlug.pyw` ile de çalışır.
 """
 import sys
 from pathlib import Path
 
-# Geliştirme modunda `warp_tray` paketini import edebilmek için
+# Geliştirme modunda `asenaplug` paketini import edebilmek için
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from warp_tray import install, win  # noqa: E402
-from warp_tray.tray import WarpTray  # noqa: E402
+from asenaplug import install, win  # noqa: E402
+from asenaplug.tray import AsenaTray  # noqa: E402
 
 
 def _msgbox_error(text: str):
@@ -22,7 +22,7 @@ def _msgbox_error(text: str):
 
 
 def main():
-    # Tray her zaman YÖNETİCİ olmalı: warp-on/off admin ister, script/exe kopyalama
+    # Tray her zaman YÖNETİCİ olmalı: asena-on/off admin ister, script/exe kopyalama
     # da öyle. Kurulu olsa bile (logon görevi dışı elle açılışta) yönetici değilsek
     # UAC ile yüksel — yoksa connect olmaz ve yeni scriptler kopyalanmaz.
     if not win.is_admin():
@@ -48,7 +48,7 @@ def main():
     # Aynı anda tek tray (logon görevi + elle açış iki tray açmasın)
     if not win.acquire_single_instance():
         sys.exit(0)
-    WarpTray().run()
+    AsenaTray().run()
 
 
 if __name__ == "__main__":
