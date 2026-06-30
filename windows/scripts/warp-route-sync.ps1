@@ -19,7 +19,11 @@ $BlacklistTxt  = Join-Path $ConfigDir "warp-blacklist.txt"
 $ResolvedFile  = Join-Path $RunDir "warp-resolved-ips.txt"
 $TunName       = "usque"
 $V6Rule        = "WarpTray-IPv6-FailClosed"
-$PruneAfter    = 3      # bir IP bu kadar döngü görünmezse route'u kaldır
+# CDN'ler (AWS/Cloudflare) her sorguda farklı IP döndürür. Agresif prune edersek
+# tarayıcının kullandığı IP düşüp kaynak yarım gelir. Yüksek tut -> IP'ler oturum
+# boyunca BİRİKİR, CDN havuzu zamanla tam kapsanır, set sabitlenir (churn durur).
+# (dns-reload / reconnect zaten sıfırdan kurar.)
+$PruneAfter    = 240    # ~1 saat (15sn x 240); pratikte oturum boyunca tutar
 $SleepSeconds  = 15
 # dnsproxy watchdog (selective modda sistem DNS 127.0.0.2'ye bağlı; dnsproxy
 # ölürse internet gider — ölmüşse yeniden başlat)
