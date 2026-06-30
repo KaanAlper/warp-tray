@@ -80,11 +80,22 @@ while ($true) {
     $desiredV4 = @{}
     $v6set = New-Object System.Collections.Generic.HashSet[string]
 
+    # PARALEL DNS çözümü: tüm domainleri async fırlat, topluca bekle (PS 5.1'de
+    # ForEach -Parallel yok; .NET async Task kullanıyoruz). Sıralı ~30-60sn yerine
+    # birkaç saniye. Tek tek GetHostAddresses çağrısı (her biri tünelden) yavaştı.
+    $tasks = @{}
     foreach ($domain in $domains) {
+        try { $tasks[$domain] = [System.Net.Dns]::GetHostAddressesAsync($domain) } catch {}
+    }
+    if ($tasks.Count -gt 0) {
         try {
-            $addrs = [System.Net.Dns]::GetHostAddresses($domain)
-        } catch { continue }
-        foreach ($a in $addrs) {
+            [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($tasks.Values), 15000) | Out-Null
+        } catch {}  # bazı task'lar timeout/hata -> bir sonraki tur yakalar
+    }
+    foreach ($domain in $tasks.Keys) {
+        $t = $tasks[$domain]
+        if ($t.Status -ne 'RanToCompletion' -or -not $t.Result) { continue }
+        foreach ($a in $t.Result) {
             $ip = $a.ToString()
             if ($a.AddressFamily -eq 'InterNetwork') {
                 $desiredV4[$ip] = $true
