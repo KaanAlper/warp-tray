@@ -15,13 +15,6 @@ from warp_tray import install, win  # noqa: E402
 from warp_tray.tray import WarpTray  # noqa: E402
 
 
-def _msgbox_question(text: str) -> bool:
-    from PySide6.QtWidgets import QApplication, QMessageBox
-    QApplication.instance() or QApplication(sys.argv)
-    ret = QMessageBox.question(None, "AsenaPlug Kurulum", text)
-    return ret == QMessageBox.StandardButton.Yes
-
-
 def _msgbox_error(text: str):
     from PySide6.QtWidgets import QApplication, QMessageBox
     QApplication.instance() or QApplication(sys.argv)
@@ -29,18 +22,17 @@ def _msgbox_error(text: str):
 
 
 def main():
+    # Tray her zaman YÖNETİCİ olmalı: warp-on/off admin ister, script/exe kopyalama
+    # da öyle. Kurulu olsa bile (logon görevi dışı elle açılışta) yönetici değilsek
+    # UAC ile yüksel — yoksa connect olmaz ve yeni scriptler kopyalanmaz.
+    if not win.is_admin():
+        win.relaunch_as_admin()  # UAC; yükseltilmiş kopya devam eder, bu süreç biter
+
     # Aynı anda tek tray (logon görevi + elle açış iki tray açmasın)
     if not win.acquire_single_instance():
         sys.exit(0)
 
     if install.needs_setup():
-        if not win.is_admin():
-            if not _msgbox_question(
-                "AsenaPlug ilk kurulum için yönetici yetkisi gerektirir.\n"
-                "Devam edilsin mi?"
-            ):
-                sys.exit(0)
-            win.relaunch_as_admin()  # UAC ile yeniden başlar, bu süreç biter
         try:
             install.run_setup()
         except Exception as e:

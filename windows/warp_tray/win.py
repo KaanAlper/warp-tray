@@ -38,7 +38,9 @@ def acquire_single_instance(name: str = "AsenaPlug_SingleInstance") -> bool:
 
 def relaunch_as_admin():
     """UAC ile kendini yönetici olarak yeniden başlat."""
-    params = " ".join(f'"{a}"' for a in sys.argv)
+    # frozen: lpFile zaten exe -> argv[0]'ı tekrar geçme. dev: script'i (argv[0]) geç.
+    argv = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
+    params = " ".join(f'"{a}"' for a in argv)
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
     sys.exit(0)
 
