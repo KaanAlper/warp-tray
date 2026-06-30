@@ -83,6 +83,7 @@ def normalize_domain(line: str) -> str | None:
         return None
     if line.startswith("*."):
         line = line[2:]
+    line = line.split("/", 1)[0].split(":", 1)[0]  # yol/port sıyır (ör. site.com:443)
     line = line.strip().strip(".").lower()
     return line or None
 

@@ -19,8 +19,9 @@ $DnsproxyExe  = Join-Path (Join-Path $env:ProgramFiles "usque") "dnsproxy.exe"
 $TunName      = "usque"
 $V6Rule       = "WarpTray-IPv6-FailClosed"
 $ListenDns    = "127.0.0.2"
-$UpstreamDns1 = "77.88.8.8:1253"
-$UpstreamDns2 = "77.88.8.1:1253"
+$UpstreamDns1 = "1.1.1.1:53"
+$UpstreamDns2 = "1.0.0.1:53"
+$Resolvers    = @("1.1.1.1", "1.0.0.1")
 
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -53,7 +54,8 @@ if (Test-Path $BlacklistTxt) {
     $domains = Get-Content $BlacklistTxt |
         ForEach-Object { ($_ -replace '#.*', '').Trim() } |
         Where-Object { $_ -ne '' } |
-        ForEach-Object { ($_ -replace '^\*\.', '').TrimEnd('.').ToLower() } |
+        ForEach-Object { (($_ -replace '^\*\.', '') -replace ':\d+.*$', '').TrimEnd('.').ToLower() } |
+        Where-Object { $_ -match '^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$' } |
         Sort-Object -Unique
 }
 
@@ -80,11 +82,16 @@ while (-not $ok -and $tries -lt 10) {
 }
 
 if ($ok) {
-    foreach ($d in $domains) {
-        Add-DnsClientNrptRule -Namespace ("." + $d) -NameServers $ListenDns -ErrorAction SilentlyContinue
+    # resolver IP'lerini WARP tüneline route et (zehirsiz DNS) — /32 temizliğinde silindi
+    foreach ($r in $Resolvers) {
+        Get-NetRoute -DestinationPrefix "$r/32" -ErrorAction SilentlyContinue |
+            Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
     }
+    $ns = @($domains | ForEach-Object { "." + $_ })
+    Add-DnsClientNrptRule -Namespace $ns -NameServers $ListenDns -ErrorAction SilentlyContinue
     Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
-    Write-Log "tamam — $($domains.Count) domain NRPT'ye eklendi, route-sync başlatıldı."
+    Write-Log "tamam — $($domains.Count) domain NRPT, resolver'lar tünelden, route-sync başlatıldı."
 } else {
     Write-Log "UYARI: dnsproxy dinlemedi — NRPT eklenmedi."
 }

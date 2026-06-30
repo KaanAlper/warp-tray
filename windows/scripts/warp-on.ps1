@@ -35,8 +35,11 @@ $StderrLog    = Join-Path $DataDir "usque-stderr.log"
 
 $TunName      = "usque"
 $ListenDns    = "127.0.0.2"
-$UpstreamDns1 = "77.88.8.8:1253"   # Yandex, port 1253 -> TR port-53 interception bypass
-$UpstreamDns2 = "77.88.8.1:1253"
+# dnsproxy upstream: sorgular WARP TÜNELİNDEN geçer (resolver IP'leri TUN'a
+# route'lanır) -> ISP zehirleyemez. Yandex:1253 düz-DNS artık TR'de zehirleniyordu.
+$UpstreamDns1 = "1.1.1.1:53"
+$UpstreamDns2 = "1.0.0.1:53"
+$Resolvers    = @("1.1.1.1", "1.0.0.1")   # /32 -> TUN
 $FullDns      = "1.1.1.1"          # full modda DNS tünelden geçer
 # Cloudflare WARP endpoint altyapısı (içerik DEĞİL — bunları fiziksel'de pinlemek
 # güvenli; usque'nin kendi bağlantısı tünele girip loop yapmasın). 162.159.192.0/19
@@ -160,7 +163,8 @@ else {
         $domains = Get-Content $BlacklistTxt |
             ForEach-Object { ($_ -replace '#.*', '').Trim() } |
             Where-Object { $_ -ne '' } |
-            ForEach-Object { ($_ -replace '^\*\.', '').TrimEnd('.').ToLower() } |
+            ForEach-Object { (($_ -replace '^\*\.', '') -replace ':\d+.*$', '').TrimEnd('.').ToLower() } |
+            Where-Object { $_ -match '^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$' } |
             Sort-Object -Unique
     }
 
@@ -185,11 +189,19 @@ else {
                 $tries++
             }
             if ($ok) {
-                # SADECE blacklist domainleri -> dnsproxy (NRPT). Sistem DNS değişmez.
-                foreach ($d in $domains) {
-                    Add-DnsClientNrptRule -Namespace ("." + $d) -NameServers $ListenDns -ErrorAction SilentlyContinue
+                # dnsproxy upstream sorgularını (1.1.1.1/1.0.0.1) WARP tüneline sok
+                # -> DNS cevabı ISP tarafından zehirlenemez, gerçek IP gelir.
+                foreach ($r in $Resolvers) {
+                    Get-NetRoute -DestinationPrefix "$r/32" -ErrorAction SilentlyContinue |
+                        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+                    New-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
                 }
-                Write-Log "SELECTIVE: $($domains.Count) domain NRPT ile dnsproxy'ye yönlendirildi (sistem DNS değişmedi)."
+                # SADECE blacklist domainleri -> dnsproxy (NRPT). Sistem DNS değişmez.
+                # Tek çağrıda tüm namespace'ler (324 ayrı cmdlet yerine) -> hızlı.
+                $ns = @($domains | ForEach-Object { "." + $_ })
+                Add-DnsClientNrptRule -Namespace $ns -NameServers $ListenDns -ErrorAction SilentlyContinue
+                Clear-DnsClientCache -ErrorAction SilentlyContinue  # eski zehirli kayıtları at
+                Write-Log "SELECTIVE: $($domains.Count) domain NRPT, resolver'lar tünelden (sistem DNS değişmedi)."
             } else {
                 Write-Log "UYARI: dnsproxy dinlemedi — NRPT eklenmedi, blacklist devre dışı."
             }

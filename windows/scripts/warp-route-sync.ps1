@@ -25,8 +25,9 @@ $SleepSeconds  = 15
 # ölürse internet gider — ölmüşse yeniden başlat)
 $DnsproxyExe   = Join-Path (Join-Path $env:ProgramFiles "usque") "dnsproxy.exe"
 $ListenDns     = "127.0.0.2"
-$UpstreamDns1  = "77.88.8.8:1253"
-$UpstreamDns2  = "77.88.8.1:1253"
+$UpstreamDns1  = "1.1.1.1:53"
+$UpstreamDns2  = "1.0.0.1:53"
+$Resolvers     = @("1.1.1.1", "1.0.0.1")
 
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -59,12 +60,20 @@ while ($true) {
         Write-Log "dnsproxy düşmüştü, yeniden başlatıldı (watchdog)"
     }
 
+    # resolver IP'leri her zaman WARP tünelinden geçsin (zehirsiz DNS garantisi)
+    foreach ($r in $Resolvers) {
+        if (-not (Get-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue)) {
+            New-NetRoute -DestinationPrefix "$r/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+
     $domains = @()
     if (Test-Path $BlacklistTxt) {
         $domains = Get-Content $BlacklistTxt |
             ForEach-Object { ($_ -replace '#.*', '').Trim() } |
             Where-Object { $_ -ne '' } |
-            ForEach-Object { ($_ -replace '^\*\.', '').TrimEnd('.') } |
+            ForEach-Object { (($_ -replace '^\*\.', '') -replace ':\d+.*$', '').TrimEnd('.').ToLower() } |
+            Where-Object { $_ -match '^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$' } |
             Sort-Object -Unique
     }
 
