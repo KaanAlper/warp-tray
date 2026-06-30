@@ -114,29 +114,29 @@ while ($true) {
         }
     }
 
-    # --- IPv4: ekle ---
+    # TUN interface index (route.exe için). route.exe, New-NetRoute (CIM) cmdlet'inden
+    # ~10-50x hızlı -> 250 route ~15sn yerine ~1-2sn'de eklenir (siteler hızlı açılır).
+    $tunIdx = (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue).ifIndex
+
+    # --- IPv4: ekle (route.exe, hızlı) ---
     $added = 0
     foreach ($ip in $desiredV4.Keys) {
         $miss.Remove($ip) | Out-Null
         if (-not $routed.ContainsKey($ip)) {
-            $exists = Get-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue
-            if (-not $exists) {
-                New-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
-            }
+            & route -4 add $ip mask 255.255.255.255 0.0.0.0 metric 1 if $tunIdx 2>$null | Out-Null
             $routed[$ip] = $true
             $added++
         }
     }
 
-    # --- IPv4: kalıcı kaybolanı prune et ---
+    # --- IPv4: kalıcı kaybolanı prune et (route.exe delete) ---
     $removed = 0
     foreach ($ip in @($routed.Keys)) {
         if (-not $desiredV4.ContainsKey($ip)) {
             $m = 0; if ($miss.ContainsKey($ip)) { $m = $miss[$ip] }
             $m++
             if ($m -ge $PruneAfter) {
-                Get-NetRoute -DestinationPrefix "$ip/32" -InterfaceAlias $TunName -ErrorAction SilentlyContinue |
-                    Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+                & route -4 delete $ip 2>$null | Out-Null
                 $routed.Remove($ip) | Out-Null
                 $miss.Remove($ip) | Out-Null
                 $removed++
