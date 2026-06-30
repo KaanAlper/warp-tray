@@ -27,6 +27,7 @@ $ConfigDir    = Join-Path $DataDir "config"
 $RunDir       = Join-Path $DataDir "run"
 $LogFile      = Join-Path $DataDir "usque.log"
 $ConfigJson   = Join-Path $ConfigDir "config.json"
+$BlacklistTxt = Join-Path $ConfigDir "warp-blacklist.txt"
 $StateFile    = Join-Path $RunDir "state.json"
 $DesiredFile  = Join-Path $RunDir "desired.json"
 $StdoutLog    = Join-Path $DataDir "usque-stdout.log"
@@ -37,8 +38,10 @@ $ListenDns    = "127.0.0.2"
 $UpstreamDns1 = "77.88.8.8:1253"   # Yandex, port 1253 -> TR port-53 interception bypass
 $UpstreamDns2 = "77.88.8.1:1253"
 $FullDns      = "1.1.1.1"          # full modda DNS tünelden geçer
-# Cloudflare MASQUE altyapı bloğu (endpoint UDP/http3'te dinamik bulunamazsa pin)
-$CfBaseline   = "162.159.198.0/24"
+# Cloudflare WARP endpoint altyapısı (içerik DEĞİL — bunları fiziksel'de pinlemek
+# güvenli; usque'nin kendi bağlantısı tünele girip loop yapmasın). 162.159.192.0/19
+# tüm WARP endpoint /24'lerini kapsar (.192/.193/.195/.198/.204).
+$CfRanges     = @("162.159.192.0/19")
 
 foreach ($d in @($RunDir, $ConfigDir, $DataDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
@@ -118,7 +121,7 @@ function Add-Pin([string]$prefix) {
     Write-Log "Endpoint pin: $prefix -> $physIface"
 }
 
-# http2 (TCP) ise gerçek endpoint'i bul; bulunamazsa (http3/UDP) baseline blok pin'le
+# http2 (TCP) ise gerçek endpoint'i bul; bulunamazsa (http3/UDP) WARP aralıklarını pinle
 $endpoint = $null
 try {
     $endpoint = (Get-NetTCPConnection -OwningProcess $usquePid -RemotePort 443 `
@@ -126,7 +129,11 @@ try {
                  Select-Object -First 1).RemoteAddress
 } catch {}
 if ($endpoint) { Add-Pin "$endpoint/32" }
-if ($scope -eq "full" -or -not $endpoint) { Add-Pin $CfBaseline }
+# full modda VEYA endpoint dinamik bulunamadıysa: tüm Cloudflare WARP endpoint
+# aralıklarını fiziksel'de pinle ki usque'nin kendi bağlantısı tünele girip loop yapmasın.
+if ($scope -eq "full" -or -not $endpoint) {
+    foreach ($r in $CfRanges) { Add-Pin $r }
+}
 
 # --- 4. Scope'a göre routing ---
 if ($scope -eq "full") {
@@ -141,34 +148,57 @@ if ($scope -eq "full") {
     Write-Log "FULL: split-default -> $TunName, DNS=$FullDns"
 }
 else {
-    # selective: fiziksel default kalır; TUN yüksek metric
+    # selective: fiziksel default kalır; TUN yüksek metric. SİSTEM DNS'İNE DOKUNMAYIZ.
+    # Sadece blacklist domainleri NRPT ile dnsproxy'ye (clean DNS) yönlendirilir;
+    # gerisi normal ISP DNS kullanır (zehirli/normal kalır). dnsproxy ölse bile
+    # sadece blacklist çözümü etkilenir, internet ayakta kalır.
     Set-NetIPInterface -InterfaceAlias $TunName -InterfaceMetric 5000 -ErrorAction SilentlyContinue
 
-    # dnsproxy: önce başlat + DİNLEDİĞİNİ doğrula, ANCAK ondan sonra sistem DNS'ini değiştir
-    Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
-    if (Test-Path $DnsproxyExe) {
-        $dnsArgs = @("-l", $ListenDns, "-p", "53", "-u", $UpstreamDns1, "-u", $UpstreamDns2, "--cache")
-        $dnsProc = Start-Process -FilePath $DnsproxyExe -ArgumentList $dnsArgs -NoNewWindow -PassThru
-        $ok = $false; $tries = 0
-        while (-not $ok -and $tries -lt 10) {
-            Start-Sleep -Milliseconds 300
-            $alive = Get-Process -Id $dnsProc.Id -ErrorAction SilentlyContinue
-            $listen = Get-NetUDPEndpoint -LocalAddress $ListenDns -LocalPort 53 -ErrorAction SilentlyContinue
-            if ($alive -and $listen) { $ok = $true }
-            $tries++
-        }
-        if ($ok) {
-            Set-DnsClientServerAddress -InterfaceAlias $physIface -ServerAddresses @($ListenDns) -ErrorAction SilentlyContinue
-            Write-Log "SELECTIVE: dnsproxy $ListenDns:53 ayakta, sistem DNS -> $ListenDns"
-        } else {
-            Write-Log "UYARI: dnsproxy dinlemedi — DNS'e DOKUNULMADI (internet korunur). Blacklist devre dışı."
-        }
-    } else {
-        Write-Log "UYARI: dnsproxy.exe yok — blacklist DNS atlandı."
+    # blacklist oku
+    $domains = @()
+    if (Test-Path $BlacklistTxt) {
+        $domains = Get-Content $BlacklistTxt |
+            ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+            Where-Object { $_ -ne '' } |
+            ForEach-Object { ($_ -replace '^\*\.', '').TrimEnd('.').ToLower() } |
+            Sort-Object -Unique
     }
 
-    # route-sync watchdog (blacklist /32 + IPv6 fail-closed)
-    Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+    # eski NRPT kurallarımızı temizle (NameServers 127.0.0.2 = bizimkiler)
+    Get-DnsClientNrptRule -ErrorAction SilentlyContinue |
+        Where-Object { $_.NameServers -contains $ListenDns } |
+        ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }
+
+    if ($domains.Count -eq 0) {
+        Write-Log "SELECTIVE: blacklist boş — DNS'e dokunulmadı, hiçbir şey unblock edilmedi."
+    } else {
+        Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
+        if (Test-Path $DnsproxyExe) {
+            $dnsArgs = @("-l", $ListenDns, "-p", "53", "-u", $UpstreamDns1, "-u", $UpstreamDns2, "--cache")
+            $dnsProc = Start-Process -FilePath $DnsproxyExe -ArgumentList $dnsArgs -NoNewWindow -PassThru
+            $ok = $false; $tries = 0
+            while (-not $ok -and $tries -lt 10) {
+                Start-Sleep -Milliseconds 300
+                $alive = Get-Process -Id $dnsProc.Id -ErrorAction SilentlyContinue
+                $listen = Get-NetUDPEndpoint -LocalAddress $ListenDns -LocalPort 53 -ErrorAction SilentlyContinue
+                if ($alive -and $listen) { $ok = $true }
+                $tries++
+            }
+            if ($ok) {
+                # SADECE blacklist domainleri -> dnsproxy (NRPT). Sistem DNS değişmez.
+                foreach ($d in $domains) {
+                    Add-DnsClientNrptRule -Namespace ("." + $d) -NameServers $ListenDns -ErrorAction SilentlyContinue
+                }
+                Write-Log "SELECTIVE: $($domains.Count) domain NRPT ile dnsproxy'ye yönlendirildi (sistem DNS değişmedi)."
+            } else {
+                Write-Log "UYARI: dnsproxy dinlemedi — NRPT eklenmedi, blacklist devre dışı."
+            }
+        } else {
+            Write-Log "UYARI: dnsproxy.exe yok — blacklist DNS atlandı."
+        }
+        # route-sync: blacklist IP'lerini WARP'a route et (+IPv6 fail-closed)
+        Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
+    }
 }
 
 # --- 5. state.json yaz (tek doğru kaynak) ---

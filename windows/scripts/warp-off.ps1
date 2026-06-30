@@ -13,6 +13,7 @@ $LogFile   = Join-Path $DataDir "usque.log"
 $StateFile = Join-Path $RunDir "state.json"
 $TunName   = "usque"
 $V6Rule    = "WarpTray-IPv6-FailClosed"
+$ListenDns = "127.0.0.2"
 
 function Write-Log($msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -33,9 +34,22 @@ Stop-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
 # 2. dnsproxy durdur
 Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
 
-# 3. DNS'i her adapterde otomatiğe al (HER ZAMAN — internet geri gelsin)
+# 3. NRPT kurallarımızı kaldır (selective: sistem DNS'ine dokunmadık, sadece
+#    blacklist domainlerini dnsproxy'ye yönlendirmiştik)
+Get-DnsClientNrptRule -ErrorAction SilentlyContinue |
+    Where-Object { $_.NameServers -contains $ListenDns } |
+    ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }
+
+# 3b. Sistem DNS'ini sadece GEREKİYORSA otomatiğe al: full moddaysak (DNS=1.1.1.1
+#     yapmıştık), durum bilinmiyorsa, ya da bir adapter hâlâ 127.0.0.2'ye ayarlıysa
+#     (eski selective hijack kalıntısı). Temiz selective'de DNS'e dokunmayız —
+#     kullanıcının kendi DNS ayarını bozmayalım.
+$resetAll = (-not $state) -or ($state.scope -eq "full")
 Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
-    Set-DnsClientServerAddress -InterfaceAlias $_.Name -ResetServerAddresses -ErrorAction SilentlyContinue
+    $cur = (Get-DnsClientServerAddress -InterfaceAlias $_.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
+    if ($resetAll -or ($cur -contains $ListenDns)) {
+        Set-DnsClientServerAddress -InterfaceAlias $_.Name -ResetServerAddresses -ErrorAction SilentlyContinue
+    }
 }
 
 # 4. IPv6 fail-closed firewall kuralını kaldır
