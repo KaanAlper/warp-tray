@@ -34,16 +34,22 @@ Stop-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
 # 2. dnsproxy durdur
 Stop-Process -Name "dnsproxy" -Force -ErrorAction SilentlyContinue
 
-# 3. NRPT kurallarımızı kaldır (selective: sistem DNS'ine dokunmadık, sadece
+# 3. usque'yu HEMEN durdur -> TUN adapteri ve üzerindeki TÜM route'lar (split-default
+#    + yüzlerce blacklist /32) KENDİLİĞİNDEN uçar. Tek tek silmekten çok daha hızlı.
+if ($state -and $state.pid) {
+    Stop-Process -Id $state.pid -Force -ErrorAction SilentlyContinue
+}
+Stop-Process -Name "usque" -Force -ErrorAction SilentlyContinue
+
+# 4. NRPT kurallarımızı kaldır (selective: sistem DNS'ine dokunmadık, sadece
 #    blacklist domainlerini dnsproxy'ye yönlendirmiştik)
 Get-DnsClientNrptRule -ErrorAction SilentlyContinue |
     Where-Object { $_.NameServers -contains $ListenDns } |
     ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }
 
-# 3b. Sistem DNS'ini sadece GEREKİYORSA otomatiğe al: full moddaysak (DNS=1.1.1.1
-#     yapmıştık), durum bilinmiyorsa, ya da bir adapter hâlâ 127.0.0.2'ye ayarlıysa
-#     (eski selective hijack kalıntısı). Temiz selective'de DNS'e dokunmayız —
-#     kullanıcının kendi DNS ayarını bozmayalım.
+# 5. Sistem DNS'ini sadece GEREKİYORSA otomatiğe al: full moddaysak (DNS=1.1.1.1
+#    yapmıştık), durum bilinmiyorsa, ya da bir adapter hâlâ 127.0.0.2'ye ayarlıysa
+#    (eski selective hijack kalıntısı). Temiz selective'de DNS'e dokunmayız.
 $resetAll = (-not $state) -or ($state.scope -eq "full")
 Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     $cur = (Get-DnsClientServerAddress -InterfaceAlias $_.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
@@ -52,17 +58,10 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     }
 }
 
-# 4. IPv6 fail-closed firewall kuralını kaldır
+# 6. IPv6 fail-closed firewall kuralını kaldır
 Remove-NetFirewallRule -Group $V6Rule -ErrorAction SilentlyContinue
 
-# 5. TUN üzerindeki tüm route'ları kaldır (split-default + blacklist /32)
-$tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
-if ($tun) {
-    Get-NetRoute -InterfaceIndex $tun.InterfaceIndex -ErrorAction SilentlyContinue |
-        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-}
-
-# 6. Endpoint pin route'larını kaldır
+# 7. Endpoint pin route'ları FİZİKSEL arayüzde -> usque ölünce uçmaz, explicit sil
 if ($state -and $state.pins) {
     foreach ($prefix in $state.pins) {
         Get-NetRoute -DestinationPrefix $prefix -ErrorAction SilentlyContinue |
@@ -70,13 +69,14 @@ if ($state -and $state.pins) {
     }
 }
 
-# 7. usque'yu durdur (önce state'teki pid, sonra isimle)
-if ($state -and $state.pid) {
-    Stop-Process -Id $state.pid -Force -ErrorAction SilentlyContinue
+# 8. Kalan TUN route'ları (adapter çoğunlukla gitti -> hızlı no-op; güvenlik için)
+$tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
+if ($tun) {
+    Get-NetRoute -InterfaceIndex $tun.InterfaceIndex -ErrorAction SilentlyContinue |
+        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 }
-Stop-Process -Name "usque" -Force -ErrorAction SilentlyContinue
 
-# 8. state.json sil
+# 9. state.json sil
 Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
 
 # TUN kendiliğinden gitmeli (wintun); ~2sn sonra hâlâ varsa uyar

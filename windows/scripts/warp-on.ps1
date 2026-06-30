@@ -103,6 +103,13 @@ if (-not (Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue)) {
 }
 Write-Log "TUN '$TunName' ayakta."
 
+# MTU/MSS clamp (Linux'taki 'tcp option maxseg size set 1220' eşdeğeri):
+# tünel MTU'su fiziksel'den (1500) küçük. Set etmezsek Windows büyük paket
+# gönderir, tünele sığmaz, sessizce düşer -> siteler yarım açılır (HTML gelir,
+# resim/CSS/JS gelmez). MTU 1260 -> ilan edilen MSS ~1220 (Linux'un kanıtlı değeri).
+Set-NetIPInterface -InterfaceAlias $TunName -NlMtuBytes 1260 -ErrorAction SilentlyContinue
+Write-Log "TUN MTU -> 1260 (MSS ~1220; yarım yüklenmeyi önler)."
+
 # --- 2. Default gateway / fiziksel arayüz ---
 $defRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
             Where-Object { $_.NextHop -ne "0.0.0.0" } |
@@ -208,7 +215,8 @@ else {
         } else {
             Write-Log "UYARI: dnsproxy.exe yok — blacklist DNS atlandı."
         }
-        # route-sync: blacklist IP'lerini WARP'a route et (+IPv6 fail-closed)
+        # route-sync: blacklist IP'lerini WARP'a route et (+IPv6 fail-closed).
+        # Bloklamadan başlat -> connect hızlı kalsın (route'lar birkaç sn içinde dolar).
         Start-ScheduledTask -TaskName "WarpTray_RouteSync" -ErrorAction SilentlyContinue
     }
 }
