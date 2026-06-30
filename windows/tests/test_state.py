@@ -54,6 +54,28 @@ def test_coerce_invalid_falls_back():
     assert (t, s) == ("http3", "full")
 
 
+def test_read_state_handles_powershell_bom():
+    """Regresyon: warp-on.ps1 (PS 5.1) state.json'ı BOM'lu yazar; read_state
+    utf-8-sig ile BOM'u atıp parse edebilmeli (yoksa hep None -> tray hep
+    disconnected)."""
+    import json as _json
+    import os
+    import tempfile
+    from pathlib import Path
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    p = Path(path)
+    old = state.STATE_FILE
+    try:
+        p.write_bytes(b"\xef\xbb\xbf" + _json.dumps(
+            {"transport": "http3", "scope": "full"}).encode("utf-8"))
+        state.STATE_FILE = p
+        assert state.read_state() == {"transport": "http3", "scope": "full"}
+    finally:
+        state.STATE_FILE = old
+        p.unlink()
+
+
 if __name__ == "__main__":
     # pytest yoksa basit koşucu
     import traceback

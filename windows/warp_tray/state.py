@@ -30,8 +30,9 @@ def _coerce(transport, scope):
 
 
 def read_desired() -> dict:
+    # utf-8-sig: PowerShell Set-Content -Encoding UTF8 BOM ekler; BOM'u at
     try:
-        d = json.loads(DESIRED_FILE.read_text(encoding="utf-8"))
+        d = json.loads(DESIRED_FILE.read_text(encoding="utf-8-sig"))
     except Exception:
         d = {}
     t, s = _coerce(d.get("transport"), d.get("scope"))
@@ -47,8 +48,10 @@ def write_desired(transport: str, scope: str):
 
 
 def read_state() -> dict | None:
+    # utf-8-sig ŞART: warp-on.ps1 (PowerShell 5.1) state.json'ı BOM'lu yazar;
+    # düz utf-8 ile json.loads BOM'da patlar -> hep None -> tray hep "disconnected".
     try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return json.loads(STATE_FILE.read_text(encoding="utf-8-sig"))
     except Exception:
         return None
 
@@ -98,7 +101,7 @@ def parse_blacklist(text: str) -> list[str]:
 
 def read_blacklist() -> list[str]:
     try:
-        return parse_blacklist(BLACKLIST_PATH.read_text(encoding="utf-8"))
+        return parse_blacklist(BLACKLIST_PATH.read_text(encoding="utf-8-sig"))
     except Exception:
         return []
 
