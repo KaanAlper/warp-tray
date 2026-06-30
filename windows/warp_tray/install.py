@@ -5,6 +5,7 @@ Tüm binary'ler bundle'dan (PyInstaller _MEIPASS veya repo) kopyalanır —
 RUNTIME İNDİRME YOK (eski koddaki dnsproxy indirme + sessiz hata kaldırıldı;
 dnsproxy.exe artık bundled/ içinde gelir).
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -14,8 +15,10 @@ from . import win
 from .paths import (
     INSTALL_DIR, SCRIPTS_DIR, USQUE_EXE, WINTUN_DLL, DNSPROXY_EXE,
     DATA_DIR, CONFIG_DIR, RUN_DIR, CONFIG_JSON, BLACKLIST_PATH, SETUP_FLAG, LOG_FILE,
-    TASKS,
+    TASKS, APP_NAME,
 )
+
+APP_EXE = INSTALL_DIR / f"{APP_NAME}.exe"
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -91,6 +94,9 @@ def run_setup():
         if src.exists():
             shutil.copy2(src, SCRIPTS_DIR / ps)
 
+    # 3b. exe'yi Program Files'a kur + masaüstü kısayolu (frozen exe modunda)
+    install_self()
+
     # 4. Paylaşılan veri dizinine ACL: Authenticated Users (S-1-5-11) Modify.
     #    Böylece normal-kullanıcı tray desired.json/blacklist yazar, SYSTEM okur.
     _grant_users_modify(DATA_DIR)
@@ -127,10 +133,38 @@ def _grant_users_modify(path: Path):
         log(f"icacls başarısız: {e}")
 
 
+def install_self():
+    """Frozen exe'yi Program Files'a kopyala + masaüstü kısayolu (release).
+    Dev modunda (.pyw) atlanır. Çalışan kopya kilitliyse sessiz geçer."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        src = Path(sys.executable)
+        if src.resolve() != APP_EXE.resolve():
+            INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, APP_EXE)
+    except Exception as e:
+        log(f"exe Program Files'a kopyalanamadı (çalışan örnek olabilir): {e}")
+    _create_desktop_shortcut()
+
+
+def _create_desktop_shortcut():
+    try:
+        desktop = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
+        lnk = desktop / f"{APP_NAME}.lnk"
+        ps = (f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}'); "
+              f"$s.TargetPath = '{APP_EXE}'; $s.IconLocation = '{APP_EXE},0'; "
+              f"$s.WorkingDirectory = '{INSTALL_DIR}'; $s.Save()")
+        subprocess.run(["powershell", "-NonInteractive", "-Command", ps],
+                       check=False, capture_output=True, creationflags=CREATE_NO_WINDOW)
+    except Exception as e:
+        log(f"kısayol oluşturulamadı: {e}")
+
+
 def _tray_launch():
-    """(Execute, Argument) — frozen exe ise exe; değilse pythonw + .pyw."""
+    """(Execute, Argument) — frozen ise Program Files'taki kurulu exe; değilse pythonw + .pyw."""
     if getattr(sys, "frozen", False):
-        return sys.executable, ""
+        return str(APP_EXE), ""
     pyw = Path(sys.executable).with_name("pythonw.exe")
     runner = str(pyw if pyw.exists() else sys.executable)
     return runner, f'\"{Path(sys.argv[0]).resolve()}\"'

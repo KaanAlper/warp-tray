@@ -12,7 +12,7 @@ import ctypes
 import subprocess
 import sys
 
-from .paths import SCRIPTS_DIR
+from .paths import SCRIPTS_DIR, APP_NAME
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -23,6 +23,17 @@ def is_admin() -> bool:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
         return False
+
+
+def acquire_single_instance(name: str = "AsenaPlug_SingleInstance") -> bool:
+    """Aynı anda tek tray çalışsın (logon görevi + elle açış çakışmasın).
+    Mutex bu process ömrü boyunca tutulur. Başka örnek varsa False döner."""
+    try:
+        ERROR_ALREADY_EXISTS = 183
+        ctypes.windll.kernel32.CreateMutexW(None, False, name)
+        return ctypes.windll.kernel32.GetLastError() != ERROR_ALREADY_EXISTS
+    except Exception:
+        return True  # mutex kurulamadıysa engelleme
 
 
 def relaunch_as_admin():
@@ -115,7 +126,7 @@ def adapter_exists(name: str) -> bool:
 def notify(title: str, body: str):
     try:
         from winotify import Notification
-        Notification(app_id="warp-tray", title=title, msg=body, duration="short").show()
+        Notification(app_id=APP_NAME, title=title, msg=body, duration="short").show()
     except Exception:
         # winotify yoksa tray fallback'ı tray modülünden gelir
         from . import tray

@@ -1,6 +1,6 @@
-# warp-tray — Windows Portu
+# AsenaPlug — Windows
 
-Windows 10/11 (x64). Cloudflare WARP (MASQUE/usque) için **seçilebilir routing** modlu sistem tepsisi göstergesi. Orijinal: [KaanAlper/warp-tray](https://github.com/KaanAlper/warp-tray) (Arch/Hyprland).
+Windows 10/11 (x64). Cloudflare MASQUE (usque) üzerinden **seçilebilir routing** modlu, DPI/DNS sansürünü aşan sistem tepsisi uygulaması. Orijinal: [KaanAlper/warp-tray](https://github.com/KaanAlper/warp-tray) (Arch/Hyprland).
 
 ## İki eksenli mod
 
@@ -35,16 +35,24 @@ Tray menüsünden bağımsız iki seçim:
 
 ```powershell
 cd windows
-.\build.ps1          # warp-tray.exe üretir (dist\warp-tray.exe)
-.\dist\warp-tray.exe # ilk çalıştırma: UAC -> kurulum -> tray
+.\build.ps1            # AsenaPlug.exe üretir (dist\AsenaPlug.exe)
+.\dist\AsenaPlug.exe   # ilk çalıştırma: UAC -> kurulum -> tray
 ```
+
+İlk çalıştırmada exe **kendini `C:\Program Files\usque\AsenaPlug.exe`'ye kopyalar**,
+**masaüstüne kısayol** yapar ve logon'da oradan otomatik başlar — yani `dist\`'i
+silebilirsin. Aynı anda tek tray çalışır (logon + elle açış çakışmaz).
+
+> **Güncelleme:** yeni build aldıktan sonra çalışan tray'i **Çıkış**'tan kapat, sonra
+> yeni `dist\AsenaPlug.exe`'yi (yönetici) çalıştır → kendini Program Files'a kopyalar.
+> Ayarların/blacklist/kimliğin **korunur** (kurulum bir kez çalışır; sadece kod tazelenir).
 
 **Seçenek B — kaynaktan (geliştirme):**
 
 ```powershell
 cd windows
 pip install PySide6 winotify
-pythonw .\warp-tray.pyw
+pythonw .\AsenaPlug.pyw
 ```
 
 İlk çalıştırma (admin) şunları yapar:

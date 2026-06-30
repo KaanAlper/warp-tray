@@ -68,7 +68,7 @@ try {
     # --- Build ---
     Write-Host "PyInstaller çalışıyor..." -ForegroundColor Cyan
     & $pyExe @pyPre -m PyInstaller --noconfirm --clean --onefile --windowed `
-        --name warp-tray `
+        --name AsenaPlug `
         --paths . `
         --add-data "bundled;bundled" `
         --add-data "scripts;scripts" `
@@ -79,10 +79,10 @@ try {
         --hidden-import warp_tray.install `
         --hidden-import warp_tray.tray `
         --hidden-import winotify `
-        "warp-tray.pyw"
+        "AsenaPlug.pyw"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller başarısız (exit $LASTEXITCODE)" }
 
-    Write-Host "`nTamam -> dist\warp-tray.exe" -ForegroundColor Green
+    Write-Host "`nTamam -> dist\AsenaPlug.exe" -ForegroundColor Green
 }
 finally {
     Pop-Location
